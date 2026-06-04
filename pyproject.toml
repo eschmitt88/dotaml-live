@@ -13,6 +13,8 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     "orjson>=3.10",
     "tqdm>=4.66",
+    "scikit-learn>=1.4",
+    "matplotlib>=3.8",
 ]
 
 [project.optional-dependencies]

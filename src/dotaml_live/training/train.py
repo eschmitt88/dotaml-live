@@ -42,10 +42,10 @@ if torch.cuda.is_available():
     torch.backends.cuda.enable_mem_efficient_sdp(False)
     torch.backends.cuda.enable_math_sdp(True)
 
-from data import load_train_val  # noqa: E402
-from mae import HEAD_NAMES, ScenarioSampler  # noqa: E402
-from models import build_model, count_params  # noqa: E402
-from probes import ProbeSuite  # noqa: E402
+from .data import load_train_val  # noqa: E402
+from .mae import HEAD_NAMES, ScenarioSampler  # noqa: E402
+from ..model.models import build_model, count_params  # noqa: E402
+from .probes import ProbeSuite  # noqa: E402
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -339,6 +339,9 @@ def main() -> int:
     ap.add_argument("--smoke", action="store_true")
     ap.add_argument("--metrics-suffix", default="")
     ap.add_argument("--max-epochs-override", type=int, default=None)
+    ap.add_argument("--resume", default=None,
+                    help="warm-start: load this checkpoint (state_dict) before training "
+                         "(continuous fine-tune from the current live model)")
     args = ap.parse_args()
 
     cfg = yaml.safe_load(Path(args.config).read_text())
@@ -389,6 +392,10 @@ def main() -> int:
                           n_player_feats=n_player_feats,
                           item_vocab_size=item_vocab_size)
     model = model.to(device)
+    if getattr(args, "resume", None):
+        sd = torch.load(args.resume, map_location="cpu", weights_only=True)
+        model.load_state_dict(sd, strict=True)
+        print(f"Warm-started from {args.resume} (continuous fine-tune)")
     pc = count_params(model)
     print(f"Model: {pc}, device={device}")
 

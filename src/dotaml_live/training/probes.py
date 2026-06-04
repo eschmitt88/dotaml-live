@@ -40,7 +40,7 @@ import torch.nn.functional as F
 from sklearn.metrics import roc_auc_score
 from torch.utils.data import DataLoader, Subset
 
-from mae import PER_SLOT_GROUPS, PER_MATCH_GROUPS  # noqa: F401
+from .mae import PER_SLOT_GROUPS, PER_MATCH_GROUPS  # noqa: F401
 
 
 def _bool_zero(B: int, T: int, device) -> torch.Tensor:

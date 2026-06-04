@@ -1,0 +1,10 @@
+[Unit]
+Description=Nightly dotaml-live retrain cycle
+
+[Timer]
+OnCalendar=*-*-* 04:00:00
+Persistent=true          # catch up if the machine was off at the scheduled time
+RandomizedDelaySec=600
+
+[Install]
+WantedBy=timers.target

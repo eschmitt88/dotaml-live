@@ -1,0 +1,15 @@
+# Nightly continuous-training cycle (oneshot, driven by the .timer).
+# Install (user units):
+#   ln -s ~/projects/dotaml-live/systemd/dotaml-live-retrain.{service,timer} ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now dotaml-live-retrain.timer
+[Unit]
+Description=dotaml-live continuous-training cycle (update rolling store, fine-tune, gated promote)
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/mnt/projects/dotaml-live
+ExecStart=/mnt/projects/dotaml-live/.venv/bin/python -u -m dotaml_live.training.retrain
+Environment=PYTHONUNBUFFERED=1
+# Bounded by budget.yaml ceilings; a hung run is killed after the wall limit.
+TimeoutStartSec=8h
