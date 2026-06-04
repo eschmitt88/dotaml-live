@@ -159,27 +159,27 @@ function DiscoverTab() {
   const [data, setData] = useState(null)
   const [err, setErr] = useState(null)
   const [q, setQ] = useState('')
+  const [size, setSize] = useState('pairs')      // 'pairs' | 'trios'
   const [sortKey, setSortKey] = useState('fun')
   const [limit, setLimit] = useState(150)
 
   useEffect(() => { api.combosTable().then(setData).catch((e) => setErr(String(e))) }, [])
+  useEffect(() => { setLimit(150) }, [size, q, sortKey])
 
+  const base = data ? (size === 'pairs' ? data.combos : data.trios) || [] : []
   const rows = useMemo(() => {
-    if (!data?.combos?.length) return []
-    const syn = data.combos.map((c) => c.synergy), kpm = data.combos.map((c) => c.kpm)
+    if (!base.length) return []
+    const syn = base.map((c) => c.synergy), kpm = base.map((c) => c.kpm)
     const sMin = Math.min(...syn), sMax = Math.max(...syn), kMin = Math.min(...kpm), kMax = Math.max(...kpm)
     const nrm = (x, lo, hi) => (hi > lo ? (x - lo) / (hi - lo) : 0)
-    return data.combos.map((c) => ({
-      ...c, fun: nrm(c.synergy, sMin, sMax) + nrm(c.kpm, kMin, kMax),
-    }))
-  }, [data])
+    return base.map((c) => ({ ...c, fun: nrm(c.synergy, sMin, sMax) + nrm(c.kpm, kMin, kMax) }))
+  }, [base])
 
   const view = useMemo(() => {
     const needle = q.trim().toLowerCase()
     let r = rows
-    if (needle) r = r.filter((c) => c.a_name.toLowerCase().includes(needle) || c.b_name.toLowerCase().includes(needle))
-    r = [...r].sort((x, y) => y[sortKey] - x[sortKey])
-    return r
+    if (needle) r = r.filter((c) => c.names.some((n) => n.toLowerCase().includes(needle)))
+    return [...r].sort((x, y) => y[sortKey] - x[sortKey])
   }, [rows, q, sortKey])
 
   if (err) return <p className="err">{err}</p>
@@ -189,19 +189,27 @@ function DiscoverTab() {
   const Th = ({ k, children }) => (
     <th className={`sortable ${sortKey === k ? 'on' : ''}`} onClick={() => setSortKey(k)}>{children}</th>
   )
+  const countLabel = size === 'pairs'
+    ? `${data.n_pairs.toLocaleString()} pairs`
+    : `top ${data.n_trios_kept.toLocaleString()} of ${data.n_trios_scored.toLocaleString()} trios`
 
   return (
     <section className="discover">
       <div className="disco-head">
         <div>
           <h2>Hero combo discovery</h2>
-          <p className="sub">Draft-independent pair synergy + action level — find fun duos to queue with friends.
-            {' '}{data.n_pairs.toLocaleString()} pairs over {data.n_heroes} heroes.</p>
+          <p className="sub">Draft-independent synergy + action level — find fun {size === 'pairs' ? 'duos' : 'trios'} to
+            queue with friends. {countLabel} over {data.n_heroes} heroes.</p>
         </div>
       </div>
       <div className="disco-ctrl">
+        <div className="seg">
+          {[['pairs', 'Pairs'], ['trios', 'Trios']].map(([k, l]) => (
+            <button key={k} className={size === k ? 'on' : ''} onClick={() => setSize(k)}>{l}</button>
+          ))}
+        </div>
         <input className="search" value={q} onChange={(e) => setQ(e.target.value)}
-          placeholder="contains hero…  (e.g. type 'anti-mage' to see its best partners)" />
+          placeholder="contains hero…  (e.g. 'anti-mage' for its best partners)" />
         <div className="seg">
           {[['fun', 'Most fun'], ['synergy', 'Synergy'], ['kpm', 'Kills/min']].map(([k, label]) => (
             <button key={k} className={sortKey === k ? 'on' : ''} onClick={() => setSortKey(k)}>{label}</button>
@@ -218,10 +226,12 @@ function DiscoverTab() {
         </thead>
         <tbody>
           {view.slice(0, limit).map((c, i) => (
-            <tr key={`${c.a}-${c.b}`}>
+            <tr key={c.ids.join('-')}>
               <td className="rank">{i + 1}</td>
               <td className="combo">
-                <AttrTag a={c.a_attr} /> {c.a_name} <span className="plus">+</span> <AttrTag a={c.b_attr} /> {c.b_name}
+                {c.names.map((n, j) => (
+                  <span key={j}>{j > 0 && <span className="plus">+</span>}<AttrTag a={c.attrs[j]} /> {n} </span>
+                ))}
               </td>
               <td className={c.synergy >= 0 ? 'pos' : 'neg'}>{c.synergy >= 0 ? '+' : ''}{(c.synergy * 100).toFixed(2)}%</td>
               <td>{c.kpm.toFixed(2)}</td>
