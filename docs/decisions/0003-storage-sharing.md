@@ -1,43 +1,50 @@
-# 0003 — Don't duplicate raw match storage; reference turbo's mirror in place
+# 0003 — One canonical raw lake shared by both repos
 
 - Status: accepted
 - Date: 2026-06-04
 
 ## Context
 
-`dotaml-turbo` holds a large local mirror of the 7.40 snapshot on the SN850X:
-**~81 GB raw turbo parquets** + **~9.4 GB derived** `*_extended` parquets. `dotaml-live`
-needs the same historical matches to bootstrap its rolling window and continuous
-training. Both repos sit on the **same filesystem** (`/dev/nvme1n1` → `/mnt/projects`).
-Naively re-pulling the blob window or rebuilding the derived parquets would duplicate
-~90 GB for no benefit.
+`dotaml-turbo` held the raw match parquets inside its own tree: ~94 GB pre-patch
+history (`data/history/turbo`) + ~81 GB patch-7.40 snapshot
+(`data/snapshots/7.40-2025-12-16/raw/turbo`). `dotaml-live` needs the same matches to
+bootstrap its rolling window and will pull *new* matches going forward. Keeping raw
+inside one repo while a second repo consumes (and extends) it invites duplication and
+an unclear source of truth.
+
+Investigation showed the move is low-risk: the raw dirs are plain directories, `raw`
+appears only as a `deps:` path in turbo's `dvc.yaml` (not a cached DVC output, no
+`.dvc/cache`, no remote), and both repos sit on the same SN850X filesystem (so a move
+is an instant rename). The user chose a single shared lake with turbo hard-repointed.
 
 ## Decision
 
-`dotaml-live` does **not** maintain its own copy of the historical raw mirror or
-derived parquets.
+Establish **`~/projects/dota-datalake`** as the canonical raw lake — owned by neither
+repo, mirroring the upstream Azure account name. All raw bytes live there:
 
-1. **Historical raw → reference in place (read-only).** `pipeline.yaml:raw.historical_roots`
-   points the vendored builders' `raw_roots` list at turbo's existing
-   `data/history/turbo` and `…/snapshots/7.40-2025-12-16/raw/turbo`. Read-only; never
-   copied or written.
-2. **Live tail → the only raw dotaml-live owns.** The Phase-4 Azure consumer pulls
-   **only days past the snapshot window** into `data/raw_tail/`. It never re-mirrors
-   what turbo already has.
-3. **Raw is transient.** Once a day is folded into the derived store + aggregator
-   state, its raw is prunable. `raw.retain_days` bounds `raw_tail/` to the rolling
-   window — steady-state raw footprint is ~window-width, not an ever-growing mirror.
-4. **Derived store → seed by hardlink.** `bootstrap.seed_mode: hardlink` seeds the
-   rolling store from turbo's `*_extended` parquets via hardlinks (same FS → shared
-   inodes, ~0 bytes), then appends only new days. `copy`/`rebuild` remain available
-   if the repos ever move to separate volumes.
+```
+~/projects/dota-datalake/turbo/{history, snapshot-7.40, live}/
+    year=YYYY/month=MM/day=DD/matches_*.parquet
+```
+
+- **Moved** turbo's `data/history/turbo` → `turbo/history` and
+  `…/raw/turbo` → `turbo/snapshot-7.40` (175 GB, instant same-FS rename).
+- **Hard-repointed** turbo: its 7 experiment `raw_roots` configs and the `dvc.yaml`
+  dep now use the absolute lake paths (pathlib makes the absolute root win the
+  `PROJECT_ROOT / r` join, so the builders resolve them correctly). Historical prose
+  (READMEs, NOTES, proposals) was left as an accurate record of the past layout.
+- **dotaml-live** references `turbo/history` + `turbo/snapshot-7.40` read-only and
+  appends new matches to `turbo/live/` (the Phase-4 Azure consumer).
+- Raw remains transient downstream: `raw.retain_days` prunes `live/` partitions once
+  features are built. Derived parquets stay in each repo's processed tree (turbo's
+  `*_extended` processed parquets did **not** move).
 
 ## Consequences
 
-- dotaml-live's net new storage is its registry (tens of MB) + the live tail +
-  newly-appended derived days — not a second 90 GB copy.
-- This depends on the same-filesystem invariant. If dotaml-live moves to a different
-  volume, switch `seed_mode` to `copy` and give `raw.historical_roots` a synced path;
-  hardlinks/in-place references won't span filesystems.
-- Reading turbo's raw/derived in place is the "read the snapshot once as data"
-  allowance of ADR 0001 — it does not make dotaml-live import turbo's code at runtime.
+- One source of truth; no duplicate ~175 GB copy. dotaml-live's net new raw is only
+  the live tail.
+- The lake is not a git repo; it is data (DVC/backups), never committed.
+- Depends on the same-filesystem invariant only for the *move* (already done) and for
+  cheap future seeding. Consumers use absolute lake paths, so they work regardless.
+- Supersedes the earlier draft of this ADR (in-place reference + hardlink seeding);
+  the single-lake move makes that unnecessary.

@@ -1,23 +1,22 @@
 # Data-pipeline config.
 #
-# STORAGE POLICY (see docs/decisions/0003-storage-sharing.md): dotaml-live does NOT
-# duplicate dotaml-turbo's 81 GB raw turbo mirror or its 9.4 GB derived parquets.
-# Both repos live on the same SN850X filesystem (/mnt/projects), so we REFERENCE
-# turbo's data in place (read-only) for the historical window and only store the
-# live tail locally.
+# STORAGE POLICY (see docs/decisions/0003-storage-sharing.md): there is ONE canonical
+# raw lake, ~/projects/dota-datalake, shared by dotaml-turbo and dotaml-live. Raw
+# bytes live there and nowhere else; dotaml-live references the lake (read-only for
+# history) and appends only new matches to the lake's live/ partition.
 snapshot_id: "7.40-2025-12-16"
 
-# --- raw match parquets ---
+# --- raw match parquets (canonical lake) ---
 # Consumed as an ordered list of roots (matches the vendored build_*_extended
-# raw_roots design). The historical roots point at turbo's existing mirror in place
-# (read-only, zero extra bytes). The live tail is the ONLY raw dotaml-live writes,
-# and it is pruned to the rolling-window width after features are built.
+# raw_roots design). History + snapshot are read-only; the live consumer appends to
+# live_dir, which is pruned to the rolling-window width after features are built.
 raw:
-  historical_roots:                      # read-only references — never written/copied
-    - "~/projects/research/dotaml-turbo/data/history/turbo"
-    - "~/projects/research/dotaml-turbo/data/snapshots/7.40-2025-12-16/raw/turbo"
-  live_tail_dir: "data/raw_tail"         # only NEW matches past the snapshot land here
-  retain_days: 100                       # prune raw_tail older than this (features already built)
+  lake: "~/projects/dota-datalake/turbo"
+  historical_roots:                      # read-only
+    - "~/projects/dota-datalake/turbo/history"
+    - "~/projects/dota-datalake/turbo/snapshot-7.40"
+  live_dir: "~/projects/dota-datalake/turbo/live"   # Azure tail appends here (Phase 4)
+  retain_days: 100                       # prune live/ partitions older than this once built
 
 # Snapshot-first bootstrap: seed the rolling store from turbo's existing derived
 # parquets by HARDLINK (same filesystem → shared inodes, ~0 bytes), not rebuild.
