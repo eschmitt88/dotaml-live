@@ -131,7 +131,7 @@ export default function App() {
               <LineChart data={curve} margin={{ top: 8, right: 16, bottom: 4, left: -16 }}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="minute" unit="m" />
-                <YAxis domain={[0.3, 0.8]} tickFormatter={(v) => v.toFixed(2)} />
+                <YAxis domain={[0, 1]} ticks={[0, 0.25, 0.5, 0.75, 1]} tickFormatter={(v) => v.toFixed(2)} />
                 <Tooltip formatter={(v) => (v * 100).toFixed(1) + '%'} />
                 <ReferenceLine y={0.5} stroke="#888" strokeDasharray="4 4" />
                 <Line type="monotone" dataKey="win" stroke="#16a34a" strokeWidth={2} dot={false} />
