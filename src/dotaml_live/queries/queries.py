@@ -179,7 +179,7 @@ def hero_pick_rec(f: V7Foundation,
     n_unknown_radiant = 5 - len(known_radiant) - (1 if my_side == "radiant" else 0)
     n_unknown_dire    = 5 - len(known_dire)    - (1 if my_side == "dire"    else 0)
 
-    from .v7_inference import ANON_FEATS
+    from ..model.v7_inference import ANON_FEATS
     my_feats = get_player_features_or_default(account_id)
 
     N = len(candidate_heroes)
@@ -821,7 +821,7 @@ def kills_per_minute_pair(f: V7Foundation,
     B = n_samples
     # Build inputs as numpy arrays first, then single GPU transfer
     hero_ids_np = np.zeros((B, 10), dtype=np.int64)
-    from .v7_inference import ANON_FEATS
+    from ..model.v7_inference import ANON_FEATS
     player_feats_np = np.tile(ANON_FEATS, (B, 10, 1)).astype(np.float32)
     subset_slot_per_row: list[list[int]] = []
 

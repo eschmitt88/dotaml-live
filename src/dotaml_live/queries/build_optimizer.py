@@ -135,6 +135,7 @@ from .lookups import (
 )
 from .queries import _sort_draft_track_my_slot
 from ..model.v7_inference import PROJECT_ROOT, V7Foundation
+from ..common import paths
 
 # Turbo starting gold (each player starts with ~600 in Turbo).
 TURBO_START_GOLD = 600
@@ -167,20 +168,13 @@ _DUR_CACHE: dict = {}
 
 
 def _global_duration_pmf(t_grid: np.ndarray) -> np.ndarray:
-    """Empirical game-end-time PMF over t_grid (minutes), from val durations."""
+    """Empirical game-end-time PMF over t_grid (minutes), re-binned from the
+    registry-resident duration CDF artifact (not the val parquet)."""
     key = ("global_pmf", tuple(t_grid))
     if key in _DUR_CACHE:
         return _DUR_CACHE[key]
-    rc_val = PROJECT_ROOT / "data" / "snapshots" / "7.40-2025-12-16" / \
-             "processed" / "rich_cols_extended" / "val.parquet"
-    dur_sec = pq.read_table(rc_val, columns=["duration"])["duration"].to_numpy()
-    dur_min = dur_sec / 60.0
-    # Histogram onto the grid (grid points are bin centers, 1-min wide)
-    edges = np.concatenate([[t_grid[0] - 0.5], (t_grid[:-1] + t_grid[1:]) / 2,
-                            [t_grid[-1] + 0.5]])
-    counts, _ = np.histogram(dur_min, bins=edges)
-    pmf = counts.astype(np.float64)
-    pmf = pmf / pmf.sum()
+    from . import artifacts
+    pmf = artifacts.duration_pmf_on_grid(paths.live_model_dir(), t_grid)
     _DUR_CACHE[key] = pmf
     return pmf
 

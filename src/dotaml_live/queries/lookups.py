@@ -20,6 +20,8 @@ import numpy as np
 import pyarrow.parquet as pq
 
 from ..model.v7_inference import ANON_FEATS, EXP_DIR, FEAT_NAMES, PROJECT_ROOT
+from ..common import paths
+from . import artifacts
 
 SERVE_DIR = Path(__file__).resolve().parent
 
@@ -188,97 +190,24 @@ def decompose_item(iid: int, _depth: int = 0) -> list[tuple[int | None, int]]:
 
 
 # ----- Account → player features -----
-
-
-@lru_cache(maxsize=2)
-def _load_val_with_sidecar() -> tuple[dict[int, dict[int, list[int]]], object]:
-    """Loads val parquet + account_id sidecar and returns:
-        (mid -> {slot -> account_id}, val_table_with_features)
-
-    The sidecar lives at
-      experiments/2026-05-19-player-embedding-prelim-740/sidecar/account_ids_val.parquet
-    and the v3-ablations extended sidecar at
-      experiments/2026-05-25-v3-ablations-740/sidecar/account_ids_train_extended.parquet
-    """
-    val_pf_path = PROJECT_ROOT / "data" / "snapshots" / "7.40-2025-12-16" / \
-                  "processed" / "player_features_extended" / "val.parquet"
-    sidecar_path = PROJECT_ROOT / "experiments" / \
-                   "2026-05-19-player-embedding-prelim-740" / "sidecar" / \
-                   "account_ids_val.parquet"
-
-    val_tbl = pq.read_table(val_pf_path)
-    side_tbl = pq.read_table(sidecar_path)
-
-    # Build mid -> {slot: account_id} lookup
-    side_mids = side_tbl["match_id"].to_numpy()
-    # Sidecar has 10 columns acct_0..acct_9
-    side_cols = []
-    for s in range(10):
-        col = f"acct_{s}"
-        if col in side_tbl.column_names:
-            side_cols.append(side_tbl[col].to_numpy())
-        else:
-            # Some sidecars use different naming; tolerate p{s}_account_id
-            alt = f"p{s}_account_id"
-            side_cols.append(side_tbl[alt].to_numpy() if alt in side_tbl.column_names
-                              else np.zeros(side_tbl.num_rows, dtype=np.uint64))
-
-    mid_to_slots: dict[int, list[int]] = {}
-    for i in range(side_tbl.num_rows):
-        mid = int(side_mids[i])
-        mid_to_slots[mid] = [int(c[i]) for c in side_cols]
-
-    return mid_to_slots, val_tbl
+# NOTE: the prototype's runtime val-parquet + sidecar reader was removed when this
+# module was hardened for serving. Per-account features now come from the
+# registry-resident player-feature store (queries/artifacts.py), precomputed by
+# the pipeline / bootstrap_from_snapshot.py.
 
 
 def lookup_player_features(account_id: int) -> np.ndarray | None:
-    """Pull the user's typical player features by averaging over all val
-    matches they appear in. Returns a (8,) np array, or None if the account
-    never appears in val.
+    """Return an account's typical 8-dim feature vector from the registry-resident
+    player-feature store (precomputed by bootstrap_from_snapshot.py / the pipeline).
+    Returns None for anonymous or unknown accounts.
 
-    Skips anonymous slots (account_id ∈ ANON_ACCOUNT_IDS).
+    Hardened from the prototype: reads the served artifact, not a val parquet.
     """
     if int(account_id) in ANON_ACCOUNT_IDS:
         return None
-
-    try:
-        mid_to_slots, val_tbl = _load_val_with_sidecar()
-    except FileNotFoundError as e:
-        print(f"  [lookups] val sidecar missing: {e}")
-        return None
-
-    val_mids = val_tbl["match_id"].to_numpy()
-
-    # Find (mid, slot) pairs where this account appears
-    occurrences: list[tuple[int, int]] = []
-    for mid, slots in mid_to_slots.items():
-        for s, acc in enumerate(slots):
-            if acc == int(account_id):
-                occurrences.append((mid, s))
-
-    if not occurrences:
-        return None
-
-    # Build a row-index map for the val table (so we can look up matches fast)
-    mid_to_row = {int(m): i for i, m in enumerate(val_mids)}
-
-    feats_accum = np.zeros(8, dtype=np.float64)
-    n = 0
-    for mid, slot in occurrences:
-        row_idx = mid_to_row.get(int(mid))
-        if row_idx is None:
-            continue
-        for j, fname in enumerate(FEAT_NAMES):
-            col = f"p{slot}_{fname}"
-            try:
-                feats_accum[j] += float(val_tbl[col][row_idx].as_py())
-            except (KeyError, AttributeError):
-                pass
-        n += 1
-
-    if n == 0:
-        return None
-    return (feats_accum / n).astype(np.float32)
+    store = artifacts.load_player_feature_store(str(paths.live_model_dir()))
+    vec = store.get(int(account_id))
+    return None if vec is None else vec.astype(np.float32)
 
 
 def get_player_features_or_default(account_id: int | None) -> np.ndarray:
@@ -294,27 +223,11 @@ def get_player_features_or_default(account_id: int | None) -> np.ndarray:
 # ----- Hero popularity (for masked-slot sampling) -----
 
 
-@lru_cache(maxsize=1)
 def hero_pick_distribution() -> np.ndarray:
-    """Empirical hero pick distribution from the val parquet (used as a
-    prior for sampling unknown hero slots in partial-draft queries).
-
-    Returns a (151,) probability array indexed by hero_id. Hero IDs not
-    present in val get probability 1e-6 (smoothed).
-    """
-    val_pf_path = PROJECT_ROOT / "data" / "snapshots" / "7.40-2025-12-16" / \
-                  "processed" / "player_features_extended" / "val.parquet"
-    tbl = pq.read_table(val_pf_path)
-    counts = np.zeros(151, dtype=np.float64)
-    for col in ["r0", "r1", "r2", "r3", "r4", "d0", "d1", "d2", "d3", "d4"]:
-        arr = tbl[col].to_numpy()
-        for hid in arr:
-            if 0 <= int(hid) < 151:
-                counts[int(hid)] += 1
-    # Smooth + normalize
-    counts = counts + 1e-6
-    counts[0] = 0  # never sample PAD slot
-    return counts / counts.sum()
+    """(151,) empirical hero-pick prior for sampling unknown hero slots in
+    partial-draft queries. Loaded from the registry-resident artifact
+    (precomputed), not the val parquet."""
+    return artifacts.load_hero_prior(str(paths.live_model_dir()))
 
 
 def sample_unknown_heroes(n_slots: int,
