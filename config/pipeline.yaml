@@ -1,13 +1,34 @@
 # Data-pipeline config.
+#
+# STORAGE POLICY (see docs/decisions/0003-storage-sharing.md): dotaml-live does NOT
+# duplicate dotaml-turbo's 81 GB raw turbo mirror or its 9.4 GB derived parquets.
+# Both repos live on the same SN850X filesystem (/mnt/projects), so we REFERENCE
+# turbo's data in place (read-only) for the historical window and only store the
+# live tail locally.
 snapshot_id: "7.40-2025-12-16"
 
-# Snapshot-first bootstrap source (read once, as data — see VENDOR.md / ADR 0001).
+# --- raw match parquets ---
+# Consumed as an ordered list of roots (matches the vendored build_*_extended
+# raw_roots design). The historical roots point at turbo's existing mirror in place
+# (read-only, zero extra bytes). The live tail is the ONLY raw dotaml-live writes,
+# and it is pruned to the rolling-window width after features are built.
+raw:
+  historical_roots:                      # read-only references — never written/copied
+    - "~/projects/research/dotaml-turbo/data/history/turbo"
+    - "~/projects/research/dotaml-turbo/data/snapshots/7.40-2025-12-16/raw/turbo"
+  live_tail_dir: "data/raw_tail"         # only NEW matches past the snapshot land here
+  retain_days: 100                       # prune raw_tail older than this (features already built)
+
+# Snapshot-first bootstrap: seed the rolling store from turbo's existing derived
+# parquets by HARDLINK (same filesystem → shared inodes, ~0 bytes), not rebuild.
 bootstrap:
   turbo_repo: "~/projects/research/dotaml-turbo"
+  seed_mode: hardlink                    # hardlink | copy | rebuild
   player_features_extended: "data/snapshots/7.40-2025-12-16/processed/player_features_extended"
   rich_cols_extended: "data/snapshots/7.40-2025-12-16/processed/rich_cols_extended"
 
-# Rolling store (on the SN850X under this repo's data/).
+# Rolling store (under this repo's data/). Derived features only — the durable,
+# resumable aggregator state is what makes incremental feature-building O(new matches).
 rolling_store:
   player_features: "player_features_extended"
   rich_cols: "rich_cols_extended"
@@ -20,6 +41,8 @@ filters:
   empty_inventory_max: 2
 
 # Phase 4 — Azure blob landing zone (consumer only; never re-hits Steam API).
+# Pulls ONLY days after the snapshot window into raw.live_tail_dir, never a full
+# re-mirror of what turbo already has on disk.
 azure:
   account_url: "https://dota2datalake.blob.core.windows.net"
   container: "matches"
