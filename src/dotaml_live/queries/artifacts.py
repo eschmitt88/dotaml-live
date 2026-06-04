@@ -60,6 +60,16 @@ def load_hero_prior(model_dir_str: str) -> np.ndarray:
 
 
 @lru_cache(maxsize=2)
+def load_combos_table(model_dir_str: str) -> dict:
+    """Precomputed hero-combo discovery table; {'computed': False} if not built."""
+    import json
+    p = paths.combos_table_json(Path(model_dir_str))
+    if not p.exists():
+        return {"computed": False, "combos": []}
+    return json.loads(p.read_text())
+
+
+@lru_cache(maxsize=2)
 def load_player_feature_store(model_dir_str: str) -> dict[int, np.ndarray]:
     """account_id -> (8,) float32 feature vector. Empty dict if not bootstrapped."""
     p = paths.player_feature_store(Path(model_dir_str))

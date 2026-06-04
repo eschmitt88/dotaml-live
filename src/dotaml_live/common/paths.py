@@ -71,3 +71,7 @@ def player_feature_store(model_dir: Path) -> Path:
 
 def manifest_json(model_dir: Path) -> Path:
     return model_dir / "manifest.json"
+
+def combos_table_json(model_dir: Path) -> Path:
+    """Precomputed all-pairs hero-combo discovery table (synergy + kills/min)."""
+    return model_dir / "hero_combos.json"

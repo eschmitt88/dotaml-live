@@ -4,8 +4,9 @@ import {
 } from 'recharts'
 import { api } from './api.js'
 
-const SAMPLE = [1, 6, 22, 86, 129, 5, 11, 13, 14, 35] // AM/Drow/Zeus/Rubick/Mars vs CM/SF/Puck/Pudge/Sniper
+const SAMPLE = [1, 6, 22, 86, 129, 5, 11, 13, 14, 35]
 const SLOTS = ['R1', 'R2', 'R3', 'R4', 'R5', 'D1', 'D2', 'D3', 'D4', 'D5']
+const ATTR_COLOR = { str: '#e0794b', agi: '#16a34a', int: '#3b82f6', all: '#a855f7', '?': '#888' }
 
 function HeroSelect({ heroes, value, onChange }) {
   return (
@@ -28,26 +29,18 @@ function Panel({ title, children, onRun, busy }) {
   )
 }
 
-export default function App() {
-  const [meta, setMeta] = useState(null)
-  const [model, setModel] = useState(null)
+// ---------------- Draft analysis tab ----------------
+
+function DraftTab({ meta }) {
   const [draft, setDraft] = useState(SAMPLE)
   const [accountId, setAccountId] = useState('')
   const [mySlot, setMySlot] = useState(0)
-  const [comboMode, setComboMode] = useState('synergy')
   const [out, setOut] = useState({})
   const [busy, setBusy] = useState({})
   const [err, setErr] = useState(null)
 
-  useEffect(() => {
-    api.meta().then(setMeta).catch((e) => setErr(String(e)))
-    api.model().then(setModel).catch(() => {})
-  }, [])
-
   const heroName = useMemo(() => {
-    const m = {}
-    meta?.heroes.forEach((h) => { m[h.id] = h.name })
-    return m
+    const m = {}; meta.heroes.forEach((h) => { m[h.id] = h.name }); return m
   }, [meta])
 
   const accounts = () => {
@@ -62,44 +55,27 @@ export default function App() {
     finally { setBusy((b) => ({ ...b, [key]: false })) }
   }
 
-  if (err && !meta) return <div className="app"><p className="err">Cannot reach API: {err}</p></div>
-  if (!meta) return <div className="app"><p>Loading…</p></div>
-
   const wp = out.winprob
   const curve = out.curve?.curve?.map((p) => ({ minute: p.duration_minutes, win: p.win_prob }))
 
   return (
-    <div className="app">
-      <header>
-        <h1>dotaml-live <span className="tag">Turbo</span></h1>
-        <span className="model">model: {model?.version ?? '?'} · {model?.device ?? '?'}</span>
-      </header>
-
+    <>
       {err && <p className="err">{err}</p>}
-
       <section className="draft">
         <h2>Draft</h2>
         <div className="teams">
-          <div className="team radiant">
-            <h4>Radiant</h4>
-            {[0, 1, 2, 3, 4].map((i) => (
-              <div key={i} className="slot">
-                <span>{SLOTS[i]}</span>
-                <HeroSelect heroes={meta.heroes} value={draft[i]}
-                  onChange={(v) => setDraft((d) => d.map((x, j) => j === i ? v : x))} />
-              </div>
-            ))}
-          </div>
-          <div className="team dire">
-            <h4>Dire</h4>
-            {[5, 6, 7, 8, 9].map((i) => (
-              <div key={i} className="slot">
-                <span>{SLOTS[i]}</span>
-                <HeroSelect heroes={meta.heroes} value={draft[i]}
-                  onChange={(v) => setDraft((d) => d.map((x, j) => j === i ? v : x))} />
-              </div>
-            ))}
-          </div>
+          {[['radiant', [0, 1, 2, 3, 4]], ['dire', [5, 6, 7, 8, 9]]].map(([side, idxs]) => (
+            <div key={side} className={`team ${side}`}>
+              <h4>{side[0].toUpperCase() + side.slice(1)}</h4>
+              {idxs.map((i) => (
+                <div key={i} className="slot">
+                  <span>{SLOTS[i]}</span>
+                  <HeroSelect heroes={meta.heroes} value={draft[i]}
+                    onChange={(v) => setDraft((d) => d.map((x, j) => j === i ? v : x))} />
+                </div>
+              ))}
+            </div>
+          ))}
         </div>
         <div className="ctrl">
           <label>My slot
@@ -146,8 +122,7 @@ export default function App() {
             const known_radiant = [0, 1, 2, 3, 4].filter((i) => i !== mySlot).map((i) => draft[i]).filter(Boolean)
             const known_dire = [5, 6, 7, 8, 9].filter((i) => i !== mySlot).map((i) => draft[i]).filter(Boolean)
             return api.heroPicks({
-              known_radiant: myRad ? known_radiant : known_radiant,
-              known_dire, my_side: myRad ? 'radiant' : 'dire',
+              known_radiant, known_dire, my_side: myRad ? 'radiant' : 'dire',
               account_id: accountId ? Number(accountId) : null, top_k: 10,
             })
           })}>
@@ -169,30 +144,125 @@ export default function App() {
             </div>
           )}
         </Panel>
-
-        <Panel title="Top hero combos" busy={busy.combos}
-          onRun={() => run('combos', () => api.heroCombos({
-            pool: draft.filter(Boolean), size: 2, mode: comboMode, top_k: 12,
-          }))}>
-          <div className="seg">
-            {['synergy', 'kills_per_min'].map((m) => (
-              <button key={m} className={comboMode === m ? 'on' : ''} onClick={() => setComboMode(m)}>{m}</button>
-            ))}
-          </div>
-          {out.combos && (
-            <ol className="list">
-              {out.combos.combos.map((c, i) => (
-                <li key={i}>
-                  <span>{c.hero_names.join(' + ')}</span>
-                  <b>{comboMode === 'synergy'
-                    ? (c.score >= 0 ? '+' : '') + (c.score * 100).toFixed(2) + '%'
-                    : c.kills_per_min.toFixed(2) + '/min'}</b>
-                </li>
-              ))}
-            </ol>
-          )}
-        </Panel>
       </div>
+    </>
+  )
+}
+
+// ---------------- Combo discovery tab ----------------
+
+function AttrTag({ a }) {
+  return <span className="attr" style={{ background: ATTR_COLOR[a] || '#888' }}>{a}</span>
+}
+
+function DiscoverTab() {
+  const [data, setData] = useState(null)
+  const [err, setErr] = useState(null)
+  const [q, setQ] = useState('')
+  const [sortKey, setSortKey] = useState('fun')
+  const [limit, setLimit] = useState(150)
+
+  useEffect(() => { api.combosTable().then(setData).catch((e) => setErr(String(e))) }, [])
+
+  const rows = useMemo(() => {
+    if (!data?.combos?.length) return []
+    const syn = data.combos.map((c) => c.synergy), kpm = data.combos.map((c) => c.kpm)
+    const sMin = Math.min(...syn), sMax = Math.max(...syn), kMin = Math.min(...kpm), kMax = Math.max(...kpm)
+    const nrm = (x, lo, hi) => (hi > lo ? (x - lo) / (hi - lo) : 0)
+    return data.combos.map((c) => ({
+      ...c, fun: nrm(c.synergy, sMin, sMax) + nrm(c.kpm, kMin, kMax),
+    }))
+  }, [data])
+
+  const view = useMemo(() => {
+    const needle = q.trim().toLowerCase()
+    let r = rows
+    if (needle) r = r.filter((c) => c.a_name.toLowerCase().includes(needle) || c.b_name.toLowerCase().includes(needle))
+    r = [...r].sort((x, y) => y[sortKey] - x[sortKey])
+    return r
+  }, [rows, q, sortKey])
+
+  if (err) return <p className="err">{err}</p>
+  if (!data) return <p>Loading combos…</p>
+  if (!data.computed) return <p>Combo table not computed yet. Run <code>scripts/precompute_combos.py</code>.</p>
+
+  const Th = ({ k, children }) => (
+    <th className={`sortable ${sortKey === k ? 'on' : ''}`} onClick={() => setSortKey(k)}>{children}</th>
+  )
+
+  return (
+    <section className="discover">
+      <div className="disco-head">
+        <div>
+          <h2>Hero combo discovery</h2>
+          <p className="sub">Draft-independent pair synergy + action level — find fun duos to queue with friends.
+            {' '}{data.n_pairs.toLocaleString()} pairs over {data.n_heroes} heroes.</p>
+        </div>
+      </div>
+      <div className="disco-ctrl">
+        <input className="search" value={q} onChange={(e) => setQ(e.target.value)}
+          placeholder="contains hero…  (e.g. type 'anti-mage' to see its best partners)" />
+        <div className="seg">
+          {[['fun', 'Most fun'], ['synergy', 'Synergy'], ['kpm', 'Kills/min']].map(([k, label]) => (
+            <button key={k} className={sortKey === k ? 'on' : ''} onClick={() => setSortKey(k)}>{label}</button>
+          ))}
+        </div>
+        <span className="count">showing {Math.min(limit, view.length)} of {view.length.toLocaleString()}</span>
+      </div>
+      <table className="combos">
+        <thead>
+          <tr>
+            <th>#</th><th>Combo</th>
+            <Th k="synergy">Synergy</Th><Th k="kpm">Kills/min</Th><Th k="fun">Fun</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {view.slice(0, limit).map((c, i) => (
+            <tr key={`${c.a}-${c.b}`}>
+              <td className="rank">{i + 1}</td>
+              <td className="combo">
+                <AttrTag a={c.a_attr} /> {c.a_name} <span className="plus">+</span> <AttrTag a={c.b_attr} /> {c.b_name}
+              </td>
+              <td className={c.synergy >= 0 ? 'pos' : 'neg'}>{c.synergy >= 0 ? '+' : ''}{(c.synergy * 100).toFixed(2)}%</td>
+              <td>{c.kpm.toFixed(2)}</td>
+              <td><div className="funbar"><div style={{ width: `${(c.fun / 2) * 100}%` }} /></div></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {view.length > limit &&
+        <button className="more" onClick={() => setLimit((l) => l + 150)}>show more</button>}
+    </section>
+  )
+}
+
+// ---------------- App shell ----------------
+
+export default function App() {
+  const [meta, setMeta] = useState(null)
+  const [model, setModel] = useState(null)
+  const [err, setErr] = useState(null)
+  const [tab, setTab] = useState('draft')
+
+  useEffect(() => {
+    api.meta().then(setMeta).catch((e) => setErr(String(e)))
+    api.model().then(setModel).catch(() => {})
+  }, [])
+
+  if (err && !meta) return <div className="app"><p className="err">Cannot reach API: {err}</p></div>
+  if (!meta) return <div className="app"><p>Loading…</p></div>
+
+  return (
+    <div className="app">
+      <header>
+        <h1>dotaml-live <span className="tag">Turbo</span></h1>
+        <nav className="tabs">
+          <button className={tab === 'draft' ? 'on' : ''} onClick={() => setTab('draft')}>Draft analysis</button>
+          <button className={tab === 'discover' ? 'on' : ''} onClick={() => setTab('discover')}>Combo discovery</button>
+        </nav>
+        <span className="model">model: {model?.version ?? '?'} · {model?.device ?? '?'}</span>
+      </header>
+      {tab === 'draft' ? <DraftTab meta={meta} /> : <DiscoverTab />}
     </div>
   )
 }

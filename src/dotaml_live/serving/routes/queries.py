@@ -77,3 +77,13 @@ def hero_combos(req: HeroCombosReq, request: Request):
     f = _model(request)
     combos = hc.hero_combos(f, pool=req.pool, size=req.size, mode=req.mode, top_k=req.top_k)
     return {"mode": req.mode, "size": req.size, "combos": [asdict(c) for c in combos]}
+
+
+@router.get("/combos-table")
+def combos_table(request: Request):
+    """Precomputed all-pairs discovery table (synergy + kills/min). Draft-independent;
+    served as a static table the SPA sorts/filters client-side."""
+    from ...queries import artifacts
+    from ...common import paths
+    request.app.state.model.maybe_reload()
+    return artifacts.load_combos_table(str(paths.live_model_dir()))
