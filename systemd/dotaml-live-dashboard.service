@@ -1,0 +1,21 @@
+# LAN-only dashboard service. Install (user unit):
+#   ln -s ~/projects/dotaml-live/systemd/dotaml-live-dashboard.service \
+#         ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now dotaml-live-dashboard
+# Serves the built SPA (frontend/dist) + JSON API on the configured port.
+[Unit]
+Description=dotaml-live Turbo dashboard (FastAPI + SPA, serves the live v7 model)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/mnt/projects/dotaml-live
+ExecStart=/mnt/projects/dotaml-live/.venv/bin/python -m dotaml_live.serving.app
+Restart=on-failure
+RestartSec=5
+# Pin the GPU; the model loads in ~0.3s and hot-reloads on registry promotion.
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target
