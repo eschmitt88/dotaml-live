@@ -1,0 +1,26 @@
+# Data-pipeline config.
+snapshot_id: "7.40-2025-12-16"
+
+# Snapshot-first bootstrap source (read once, as data — see VENDOR.md / ADR 0001).
+bootstrap:
+  turbo_repo: "~/projects/research/dotaml-turbo"
+  player_features_extended: "data/snapshots/7.40-2025-12-16/processed/player_features_extended"
+  rich_cols_extended: "data/snapshots/7.40-2025-12-16/processed/rich_cols_extended"
+
+# Rolling store (on the SN850X under this repo's data/).
+rolling_store:
+  player_features: "player_features_extended"
+  rich_cols: "rich_cols_extended"
+  aggregator_state: "aggregator_state"
+  chunk_days: 30          # OOM-safe flush cadence (matches build_*_extended)
+
+filters:
+  game_mode: 23
+  forfeit_filter: true
+  empty_inventory_max: 2
+
+# Phase 4 — Azure blob landing zone (consumer only; never re-hits Steam API).
+azure:
+  account_url: "https://dota2datalake.blob.core.windows.net"
+  container: "matches"
+  prefix: "turbo"         # turbo/year=YYYY/month=MM/day=DD/matches_*.parquet

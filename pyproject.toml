@@ -1,0 +1,41 @@
+[project]
+name = "dotaml-live"
+version = "0.1.0"
+description = "Live, self-updating Dota 2 Turbo service on the v7 masked-multitask foundation"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "torch>=2.4",
+    "numpy>=1.26",
+    "pyarrow>=16",
+    "pyyaml>=6",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "orjson>=3.10",
+]
+
+[project.optional-dependencies]
+# Phase 4 — live Azure blob consumer. Kept optional so Phases 0-3 install
+# and run with zero cloud dependencies (snapshot-first).
+azure = [
+    "azure-storage-blob>=12.20",
+    "azure-identity>=1.17",
+]
+dev = [
+    "pytest>=8",
+    "httpx>=0.27",
+]
+
+[project.scripts]
+dotaml-serve = "dotaml_live.serving.app:main"
+dotaml-retrain = "dotaml_live.training.retrain:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dotaml_live"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

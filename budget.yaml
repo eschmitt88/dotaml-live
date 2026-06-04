@@ -1,0 +1,16 @@
+# Resource ceilings for autonomous retrain cycles. Hard limits — a cycle halts
+# when any is hit, regardless of coordinator verdict.
+#
+# This is a PRODUCTION/SERVING repo: agency is conservative. The nightly retrain
+# is a scheduled, gated job — it does not autonomously fetch/ingest/iterate the
+# way a `max` research repo does.
+agency: standard
+
+retrain:
+  max_wall_hours: 8          # a full from-scratch v7 train was 5.73h; fine-tunes are shorter
+  max_finetune_epochs: 6
+  max_disk_gb: 200           # rolling store + registry on the SN850X
+  max_consecutive_no_promote: 5   # if 5 cycles in a row fail the gate, stop & alert
+
+registry:
+  keep_last_n: 10            # prune older non-live versions beyond this

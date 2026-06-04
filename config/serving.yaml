@@ -1,0 +1,12 @@
+# Dashboard / FastAPI serving config.
+host: "0.0.0.0"        # LAN-only (bind behind the firewall, like claude-dashboard)
+port: 8090
+reload_poll_seconds: 30   # how often model_loader checks the registry 'live' pointer
+device: "auto"            # auto -> cuda if available else cpu
+
+# Default query knobs (overridable per request)
+defaults:
+  hero_picks_top_k: 10
+  combos_top_k: 15
+  win_vs_duration_minutes: [15, 20, 25, 30, 35, 40, 45]
+  item_build_beam_width: 32

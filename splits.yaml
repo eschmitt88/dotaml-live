@@ -1,0 +1,33 @@
+# Walk-forward HCE splits for the LIVE, drifting Turbo data.
+#
+# Unlike a research repo's single frozen holdout, the live service re-seals the
+# *freshest* window as the test holdout each retrain cycle. See
+# docs/decisions/0002-sealed-holdout-policy.md. This file holds the POLICY
+# (window widths, embargo, anchor); the concrete dated windows for a given cycle
+# are written by pipeline/seal_holdout.py into the cycle's metadata.
+
+game_mode: 23            # Turbo
+partition_field: start_time_date
+date_format: "YYYY-MM-DD"
+dedup_key: match_id
+hero_id_range: [1, 150]
+
+# --- walk-forward policy (relative to each cycle's "now" = latest complete day) ---
+walk_forward:
+  test_days: 14          # freshest window sealed as test (promotion signal)
+  val_days: 14           # block before test (search/early-stop signal)
+  embargo_days: 1        # gap between train_end and val/test start (aggregator carries
+                         # player history forward — prevents adjacent-day label leak)
+  train_history: all     # train on everything older than val (recency-weighted, not truncated)
+
+# --- frozen anchor: a tiny fixed slice kept ONLY as a regression tripwire ---
+# Not the promotion signal. Inherited from the original 7.40 sealed test window.
+frozen_anchor:
+  start_date: "2026-03-10"
+  end_date:   "2026-03-23"
+  role: regression_tripwire
+  max_regression: 0.005  # sudden AUC drop > this vs the model that first sealed it = alarm
+
+sealed_test: true
+search_metrics_file: metrics.json        # validation-split metrics (search signal)
+final_metrics_file: final_metrics.json   # sealed-test metrics (final pass only)

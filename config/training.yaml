@@ -1,0 +1,24 @@
+# Continuous-training config (layers on top of the vendored model config.yaml).
+base_config: "registry/v7-base/config.yaml"
+
+finetune:
+  resume_from: live          # warm-start from the current live checkpoint
+  epochs: 3                  # short nightly fine-tune (full from-scratch is ~25 ep / 5.7h)
+  fresh_warmup_steps: 500    # cosine had decayed to min lr; re-warm briefly
+  monitor_only_halt: true    # probe halt is advisory during fine-tune, not fatal
+
+# Recency-weighted training (per-row loss multiplier). See ADR 0002.
+recency:
+  half_life_days: 60         # w = 0.5 ^ (age_days / half_life_days)
+  current_patch_upweight: 1.3   # psi: small multiplier for current-patch matches (1.2-1.4)
+
+# Weekly from-scratch anchor retrain to bound long-run drift/forgetting.
+anchor_retrain:
+  enabled: true
+  schedule: weekly
+  epochs: 25
+
+promotion:
+  beat_incumbent_margin: 0.0005   # candidate must beat incumbent on fresh test window by >= this
+  anchor_max_regression: 0.005    # reject if frozen-anchor AUC drops more than this
+  require_probes_pass: true

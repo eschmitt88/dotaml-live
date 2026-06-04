@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# uv
+# (uv.lock IS tracked)
+
+# Data + model artifacts live on the SN850X / DVC, not git
+/data/
+/registry/**/model.pt
+/registry/**/*.parquet
+/registry/**/*.npz
+/registry/**/*.npy
+
+# Frontend build
+/frontend/node_modules/
+/frontend/dist/
+
+# Local env
+.env
+*.log
