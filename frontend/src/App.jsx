@@ -133,8 +133,7 @@ export default function App() {
                 <XAxis dataKey="minute" unit="m" />
                 <YAxis domain={[0, 1]} ticks={[0, 0.25, 0.5, 0.75, 1]} tickFormatter={(v) => v.toFixed(2)} />
                 <Tooltip formatter={(v) => (v * 100).toFixed(1) + '%'} />
-                <ReferenceLine y={0.5} stroke="#c9d4e0" strokeWidth={2} strokeDasharray="6 3"
-                  label={{ value: '50%', position: 'right', fill: '#c9d4e0', fontSize: 11 }} />
+                <ReferenceLine y={0.5} stroke="#c9d4e0" strokeWidth={2} strokeDasharray="6 3" />
                 <Line type="monotone" dataKey="win" stroke="#16a34a" strokeWidth={2} dot={false} />
               </LineChart>
             </ResponsiveContainer>
