@@ -24,8 +24,21 @@ and `VENDOR.md` for code provenance. The plan lives at
 
 ## Status
 
-Phase 0 (scaffold + vendor) — in progress. Snapshot-first: stands up on
-dotaml-turbo's existing 7.40 snapshot + checkpoint before the live Azure consumer.
+All four phases scaffolded and unit-tested (snapshot-first; raw lives in the shared
+`~/projects/dota-datalake` lake):
+- **Phase 0** vendor + scaffold — done.
+- **Phase 1** dashboard on the vendored v7 checkpoint — done (FastAPI + SPA, 5 endpoints).
+- **Phase 2** rolling store + durable incremental aggregator — done (schema parity,
+  resumable, determinism-verified).
+- **Phase 3** continuous-training control plane (registry, head-to-head gate,
+  orchestration, warm-start, nightly systemd) — done; the fine-tune execution is the
+  one GPU-validated integration point (run `scripts/replay_history.sh` first).
+- **Phase 4** Azure blob consumer (tail-only, no Steam API) — built; needs `az login`
+  + `pip install -e '.[azure]'` to run live.
+
+To stand it up for real: `scripts/replay_history.sh` (full feature replay), then the
+first fine-tune via `python -m dotaml_live.training.retrain`, then enable the systemd
+timer. `pytest` is green.
 
 ## Layout
 

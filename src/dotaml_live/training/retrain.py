@@ -63,8 +63,14 @@ def _latest_day() -> str | None:
 def run_cycle(now: str | None = None, timestamp: str = "", train: bool = True,
               update_data: bool = True) -> dict:
     cfg = config.training_config()
-    # 1. update rolling store
+    # 0+1. pull new blobs from Azure (if available), then update the rolling store
     if update_data:
+        try:
+            from ..pipeline import blob_consumer
+            if not blob_consumer._azure_unavailable():
+                print(f"[retrain] blob pull: {blob_consumer.pull()}")
+        except Exception as e:  # noqa: BLE001
+            print(f"[retrain] blob pull skipped: {e}")
         stats = build_runner.run()
         print(f"[retrain] rolling store updated: {stats}")
     now = now or _latest_day()

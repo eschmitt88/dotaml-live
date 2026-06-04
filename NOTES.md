@@ -39,3 +39,33 @@ Did / Findings / Next, appended per session (mirrors the research-repo disciplin
   `registry.py`, head-to-head `promote.py` gate, systemd retrain timer.
 - **Phase 4** — Azure blob consumer (DefaultAzureCredential), no Steam API.
 - Nice-to-have: code-split the SPA bundle (recharts pushes it >500kB).
+
+## 2026-06-04 (session 2) — storage consolidation + Phases 2-4
+
+### Did
+- **Storage:** consolidated all raw into one canonical lake `~/projects/dota-datalake`
+  (175 GB moved by instant same-FS rename; turbo hard-repointed: 7 configs + dvc.yaml;
+  ADR 0003). dotaml-live consumes the lake; raw is one source of truth.
+- **Phase 2:** durable resumable aggregator (`features/aggregator.py`, wraps vendored
+  PlayerAggregator), `pipeline/{rolling_store,build_runner,seal_holdout}.py`. Verified
+  on real lake data: 115/115 schema parity; incremental-resume == fresh-batch
+  (bit-identical features + state).
+- **Phase 3:** `training/{registry,promote,retrain}.py` + `train.py` warm-start
+  (`--resume`) + package-import fixes; systemd nightly retrain. Gate (head-to-head +
+  probes + anchor) + recency-resample unit-tested; `evaluate_win_auc` verified 0.629
+  on a slice.
+- **Phase 4:** `pipeline/blob_consumer.py` (tail-only Azure pull into the lake, lazy
+  azure deps, dry-run); wired into the retrain cycle.
+
+### Findings
+- 12 tests green. Raw move was low-risk (raw was a DVC *dep* not a cached out).
+- Latest local raw date = 2026-03-09 (test-window raw 03-10..23 was never mirrored —
+  consistent with HCE); the live consumer will pull from there.
+
+### Next
+- Run `scripts/replay_history.sh` (full 175 GB feature replay → seeds aggregator).
+- Validate the fine-tune integration point (retrain._finetune): wire train.py's data
+  config to the rolling store + materialize the recency-weighted sample; do one real
+  warm-start fine-tune on a GPU and confirm the gate flips `live`.
+- `az login` + `pip install -e '.[azure]'`, then a live `blob_consumer` pull.
+- Optional: GitHub remote + Pages; DVC/backup for the lake.
