@@ -69,3 +69,26 @@ Did / Findings / Next, appended per session (mirrors the research-repo disciplin
   warm-start fine-tune on a GPU and confirm the gate flips `live`.
 - `az login` + `pip install -e '.[azure]'`, then a live `blob_consumer` pull.
 - Optional: GitHub remote + Pages; DVC/backup for the lake.
+
+## 2026-06-04 (session 2, cont.) — data pipeline LIVE + validated
+
+### Did
+- Consolidated raw into the `~/projects/dota-datalake` lake; pulled the 82 GB Azure
+  live tail (1770 files, 2026-03-10..today) via the existing az login (no interactive
+  step needed). Added a 64 GB swapfile as OOM insurance (never actually needed).
+- Ran the full replay (35.06M matches / 196 days) then extended with the live tail
+  (15.81M / 87 days). **Rolling store now current: 283 days 2025-08-15..2026-06-04,
+  ~51M matches, 2.0M accounts, 507 MB resumable aggregator state.**
+- Dashboard live on systemd (reboot-safe) at :8090. Combo discovery moved to its own
+  precomputed tab with Pairs + Trios (synergy + kills/min, sortable/filterable).
+
+### Findings
+- **PARITY EXACT vs dotaml-turbo: max|diff|=0 over 1.6M sampled feature cells** — the
+  durable incremental aggregator is bit-identical to the batch builder. Phase 2 fully
+  validated end-to-end on real data.
+- Aggregator RAM peaked ~45-50 GB and decelerated; swap untouched.
+
+### Next
+- The one remaining step: wire train.py's data config to the rolling store +
+  recency-resample, run the first warm-start fine-tune, confirm the gate promotes.
+- Then enable the nightly retrain timer. Swapfile can be reclaimed.
