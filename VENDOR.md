@@ -28,8 +28,15 @@ hardened here. This file records where they came from.
 | `…/rich-supervision-…-740/results/item_vocab.json` | `registry/v7-base/item_vocab.json` | 305-item vocab |
 | `…/v7-…-740/results/pretrain_encoder_v7_unified.pt` | `registry/v7-base/model.pt` | trained checkpoint (26 MB, DVC) |
 
+## Local divergences from upstream v7 (re-apply after a re-vendor)
+
+- **Patch-awareness (ADR 0005):** `models.py` gains a zero-init `patch_embed`
+  (per-match bias in `encode()`); `train.py` passes `patch_id`; `PATCH_EDGES` /
+  `data.py` add the 7.41 edge `("2026-03-25", 4)`; `v7_inference` threads `patch_id`
+  + loads `strict=False`. Zero-init keeps `v7-base` byte-identical.
+
 ## Re-vendoring
 
 Run `scripts/vendor_sync.sh` to re-copy from the source repo after a new v7 train.
-It re-applies the copies above; the hardening edits are tracked in git, so review
-the diff and re-apply any that the upstream change disturbed.
+It re-applies the copies above; the hardening edits + the divergences listed above
+are tracked in git, so review the diff and re-apply any the upstream change disturbed.

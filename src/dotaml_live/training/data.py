@@ -389,7 +389,7 @@ def _build_foundation_targets_v7(
 
 def _patch_id_from_dates(dates: np.ndarray, default_patch_id: int = 1) -> np.ndarray:
     n = len(dates)
-    patch_edges = [("2025-08-01", 2), ("2025-09-10", 3), ("2025-12-16", 1)]
+    patch_edges = [("2025-08-01", 2), ("2025-09-10", 3), ("2025-12-16", 1), ("2026-03-25", 4)]  # 7.41
     out = np.full(n, default_patch_id, dtype=np.int64)
     edge_dates = np.array([e[0] for e in patch_edges], dtype="U10")
     edge_pids = np.array([e[1] for e in patch_edges], dtype=np.int64)

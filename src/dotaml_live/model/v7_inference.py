@@ -78,6 +78,11 @@ DEFAULT_GPM = 400.0
 DEFAULT_HD = 15000.0
 DEFAULT_DUR_SECONDS = 1500.0  # ~25 min Turbo
 
+# Current live patch id (7.41 = 4 per PATCH_EDGES). Default at inference; harmless on a
+# checkpoint with a zero-init patch embedding (no-op), meaningful after a retrain that
+# learns the patch embeddings. See docs/decisions/0005.
+CURRENT_PATCH_ID = 4
+
 
 @dataclass
 class V7Outputs:
@@ -187,9 +192,14 @@ class V7Foundation:
             vocab_size=151,
             n_player_feats=8,
             item_vocab_size=self.item_vocab_size,
+            patch_vocab_size=int(self.cfg.get("patch", {}).get("vocab_size", 8)),
         )
         ckpt = torch.load(self.ckpt_path, map_location="cpu", weights_only=True)
-        missing, unexpected = self.model.load_state_dict(ckpt, strict=True)
+        missing, unexpected = self.model.load_state_dict(ckpt, strict=False)
+        # The only param allowed to be absent is the zero-init patch embedding (added
+        # after v7-base trained; see 0005). Anything else missing/unexpected is an error.
+        assert not unexpected, f"unexpected checkpoint keys: {unexpected}"
+        assert set(missing) <= {"patch_embed.weight"}, f"unexpected missing keys: {missing}"
         self.model.eval().to(self.device)
 
         # Hero vocab size from the checkpoint
@@ -218,6 +228,7 @@ class V7Foundation:
             "dur_log": torch.full((B,), float(np.log1p(DEFAULT_DUR_SECONDS)),
                                    dtype=torch.float32, device=d),
             "win_idx": torch.zeros((B,), dtype=torch.long, device=d),
+            "patch_id": torch.full((B,), CURRENT_PATCH_ID, dtype=torch.long, device=d),
         }
 
     def full_mask(self, batch_size: int = 1) -> dict[str, torch.Tensor]:
@@ -300,6 +311,7 @@ class V7Foundation:
             inputs["gpm"], inputs["hd"],
             inputs["dur_log"], inputs["win_idx"],
             masks=masks,
+            patch_id=inputs.get("patch_id"),
         )
 
         return V7Outputs(

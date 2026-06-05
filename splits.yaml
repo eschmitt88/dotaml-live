@@ -30,13 +30,12 @@ walk_forward:
   embargo_days: 1
   train_history: all
 
-# --- frozen anchor: a tiny fixed slice kept ONLY as a regression tripwire ---
-# Not the promotion signal. Inherited from the original 7.40 sealed test window.
-frozen_anchor:
-  start_date: "2026-03-10"
-  end_date:   "2026-03-23"
-  role: regression_tripwire
-  max_regression: 0.005  # sudden AUC drop > this vs the model that first sealed it = alarm
+# Frozen anchor REMOVED (ADR 0005). A fixed pre-7.41 slice doesn't just freeze stale
+# data — as an anti-regression tripwire it can wrongly BLOCK a model that correctly
+# adapts to a new patch (the meta moved, so "regression" on the old meta is expected
+# and good). Prequential monitoring already catches real regressions on CURRENT data
+# (it caught 7.41), and the head-to-head gate covers "don't ship something worse".
+# Nothing is held out permanently.
 
 sealed_test: true
 search_metrics_file: metrics.json        # validation-split metrics (search signal)

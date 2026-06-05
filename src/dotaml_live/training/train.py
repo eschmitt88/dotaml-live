@@ -111,7 +111,7 @@ def _eval_pure_pregame_auc(model, loader, device, autocast_dtype) -> float:
     ys, ps = [], []
     with torch.no_grad():
         for batch in loader:
-            (hero_ids, pf, _patch_id, _acct, items,
+            (hero_ids, pf, patch_id, _acct, items,
              kills, deaths, assists, gpm, hd,
              dur_log, y_win) = batch
             B = hero_ids.size(0)
@@ -119,6 +119,7 @@ def _eval_pure_pregame_auc(model, loader, device, autocast_dtype) -> float:
             kills = kills.to(device); deaths = deaths.to(device); assists = assists.to(device)
             gpm = gpm.to(device); hd = hd.to(device)
             dur_log = dur_log.to(device); y_win = y_win.to(device)
+            patch_id = patch_id.to(device)
             win_idx = y_win.long()
             masks = _build_masks(B, device, {
                 "items": "mask", "kills": "mask", "deaths": "mask", "assists": "mask",
@@ -126,7 +127,7 @@ def _eval_pure_pregame_auc(model, loader, device, autocast_dtype) -> float:
             with torch.autocast(device_type=device.type, dtype=autocast_dtype,
                                  enabled=autocast_dtype is not None):
                 out = model(hero_ids, pf, items, kills, deaths, assists,
-                            gpm, hd, dur_log, win_idx, masks=masks)
+                            gpm, hd, dur_log, win_idx, masks=masks, patch_id=patch_id)
                 p = torch.sigmoid(out["win"].float())
             ys.append(y_win.cpu().numpy())
             ps.append(p.cpu().numpy())
@@ -177,13 +178,14 @@ def train_v7(model, train_ds, val_ds, hp: dict, max_epochs: int, device,
         sum_total = 0.0
 
         for batch in train_loader:
-            (hero_ids, pf, _patch_id, _acct, items,
+            (hero_ids, pf, patch_id, _acct, items,
              kills, deaths, assists, gpm, hd,
              dur_log, y_win) = batch
             hero_ids = hero_ids.to(device); pf = pf.to(device); items = items.to(device)
             kills = kills.to(device); deaths = deaths.to(device); assists = assists.to(device)
             gpm = gpm.to(device); hd = hd.to(device)
             dur_log = dur_log.to(device); y_win = y_win.to(device)
+            patch_id = patch_id.to(device)
             win_idx = y_win.long()
             B = hero_ids.size(0)
 
@@ -200,7 +202,7 @@ def train_v7(model, train_ds, val_ds, hp: dict, max_epochs: int, device,
             with torch.autocast(device_type=device.type, dtype=autocast_dtype,
                                  enabled=autocast_dtype is not None):
                 out = model(hero_ids, pf, items, kills, deaths, assists,
-                            gpm, hd, dur_log, win_idx, masks=masks)
+                            gpm, hd, dur_log, win_idx, masks=masks, patch_id=patch_id)
                 # Per-head losses (all 8 heads always computed).
                 # NOTE: kills/deaths/assists/gpm/hd targets log1p-transformed
                 # to keep scales commensurate (raw hd ~30000 would dominate

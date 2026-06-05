@@ -76,9 +76,10 @@ def seal(now_date: str | dt.date, cycle_dir: str | Path | None = None) -> Window
     return w
 
 
-def frozen_anchor() -> dict:
-    """The tiny fixed regression-tripwire slice (not the promotion signal)."""
-    return config.splits_policy()["frozen_anchor"]
+def frozen_anchor() -> dict | None:
+    """Removed in ADR 0005 (a frozen pre-patch slice can wrongly block patch
+    adaptation). Returns None when no frozen_anchor is configured."""
+    return config.splits_policy().get("frozen_anchor")
 
 
 # ----- prequential (test-then-train) evaluation — ADR 0004 -----

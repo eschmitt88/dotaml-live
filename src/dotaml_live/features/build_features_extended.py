@@ -75,7 +75,7 @@ PATCH_START_DATE = dt.date.fromisoformat("2025-12-16")  # 7.40 boundary
 
 # Hand-curated patch_id schedule (kept in sync with data.py:_patch_id_from_dates).
 # (start_date_iso, patch_id) -- assigned by np.searchsorted right-side.
-PATCH_EDGES = [("2025-08-01", 2), ("2025-09-10", 3), ("2025-12-16", 1)]
+PATCH_EDGES = [("2025-08-01", 2), ("2025-09-10", 3), ("2025-12-16", 1), ("2026-03-25", 4)]  # 7.41
 
 ANON_IDS = {0, 4294967295}
 

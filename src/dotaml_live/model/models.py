@@ -174,7 +174,8 @@ class FoundationTransformerV7(nn.Module):
                  use_team_team_bias: bool = True,
                  decoder_n_layers: int = 2,
                  decoder_n_heads: int = 8,
-                 remove_first_layer_first_ln: bool = True):
+                 remove_first_layer_first_ln: bool = True,
+                 patch_vocab_size: int = 8):
         super().__init__()
         self.embed_dim = int(embed_dim)
         self.d_model = int(d_model)
@@ -206,6 +207,10 @@ class FoundationTransformerV7(nn.Module):
         self.dur_input_proj = nn.Linear(1, d_model)
         # Per-match categorical: win in {0, 1} -> 2-row embedding.
         self.win_input_embed = nn.Embedding(2, d_model)
+        # Per-match patch id -> d_model bias added to every token. ZERO-INIT, so a
+        # checkpoint trained without it is byte-for-byte unchanged; lets the model
+        # condition on patch (e.g. 7.41) once retrained. See docs/decisions/0005.
+        self.patch_embed = nn.Embedding(patch_vocab_size, d_model)
 
         # ----- Learned mask embeddings (one per input group) -----
         # Per-slot:
@@ -267,6 +272,7 @@ class FoundationTransformerV7(nn.Module):
         nn.init.normal_(self.task_token_embed.weight, mean=0.0, std=0.1)
         nn.init.normal_(self.item_input_embed.weight, mean=0.0, std=0.1)
         nn.init.normal_(self.win_input_embed.weight, mean=0.0, std=0.1)
+        nn.init.zeros_(self.patch_embed.weight)   # no-op until trained (see 0005)
         # Mask embeddings: small init so they don't dominate the
         # un-masked branch at step 0.
         for p in (self.hero_mask_embed, self.pf_mask_embed, self.items_mask_embed,
@@ -360,7 +366,8 @@ class FoundationTransformerV7(nn.Module):
                kills: torch.Tensor, deaths: torch.Tensor, assists: torch.Tensor,
                gpm: torch.Tensor, hd: torch.Tensor,
                dur_log: torch.Tensor, win_idx: torch.Tensor,
-               masks: dict) -> tuple[torch.Tensor, torch.Tensor]:
+               masks: dict,
+               patch_id: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
         """Build the 12-token sequence, run encoder, return (memory, team_ids).
 
         masks is a dict with bool tensors for each maskable group:
@@ -408,6 +415,10 @@ class FoundationTransformerV7(nn.Module):
                                torch.full((B, 1), 2, dtype=torch.long, device=device),
                                torch.full((B, 1), 2, dtype=torch.long, device=device)], dim=1)
 
+        # Per-match patch bias, broadcast over all 12 tokens (zero-init -> no-op).
+        if patch_id is not None:
+            x = x + self.patch_embed(patch_id).unsqueeze(1)                     # [B, 1, d]
+
         for blk in self.encoder_blocks:
             x = blk(x, team_ids)
         x = self.encoder_norm(x)
@@ -424,12 +435,13 @@ class FoundationTransformerV7(nn.Module):
                 kills: torch.Tensor, deaths: torch.Tensor, assists: torch.Tensor,
                 gpm: torch.Tensor, hd: torch.Tensor,
                 dur_log: torch.Tensor, win_idx: torch.Tensor,
-                masks: dict | None = None) -> dict:
+                masks: dict | None = None,
+                patch_id: torch.Tensor | None = None) -> dict:
         if masks is None:
             masks = {}
         memory, _ti = self.encode(hero_ids, player_feats, items,
                                     kills, deaths, assists, gpm, hd,
-                                    dur_log, win_idx, masks)
+                                    dur_log, win_idx, masks, patch_id=patch_id)
         B = hero_ids.size(0)
         device = hero_ids.device
 
@@ -482,8 +494,9 @@ def count_params(model: nn.Module) -> dict[str, int]:
 
 
 def build_model(hp: dict, vocab_size: int, n_player_feats: int,
-                item_vocab_size: int) -> FoundationTransformerV7:
+                item_vocab_size: int, patch_vocab_size: int = 8) -> FoundationTransformerV7:
     return FoundationTransformerV7(
+        patch_vocab_size=int(patch_vocab_size),
         vocab_size=vocab_size,
         embed_dim=int(hp["embed_dim"]),
         d_model=int(hp["d_model"]),

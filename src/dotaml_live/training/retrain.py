@@ -82,8 +82,6 @@ def run_cycle(now: str | None = None, timestamp: str = "", train: bool = True,
     pf = rs.pf_dir()
     eval_files = [str(pf / f"date={d}.parquet") for d in pq.eval_dates()
                   if (pf / f"date={d}.parquet").exists()]
-    anchor = seal_holdout.frozen_anchor()
-    anchor_files = promote.window_day_files(pf, anchor["start_date"], anchor["end_date"])
     print(f"[retrain] prequential: train<= {pq.train_cutoff} | eval {pq.eval_start}..{pq.eval_end} "
           f"({len(eval_files)} unseen days)")
 
@@ -110,13 +108,10 @@ def run_cycle(now: str | None = None, timestamp: str = "", train: bool = True,
     cand_dir = registry.version_dir(candidate_ver)
     cand = promote.GateInput(
         fresh_auc=promote.evaluate_win_auc(cand_dir, eval_files) if eval_files else float("nan"),
-        probes=_load_probes(cand_dir),
-        anchor_auc=promote.evaluate_win_auc(cand_dir, anchor_files) if anchor_files else None)
+        probes=_load_probes(cand_dir), anchor_auc=None)   # frozen anchor removed (0005)
     inc = None
     if incumbent_ver and incumbent_ver != candidate_ver:
-        inc_dir = registry.version_dir(incumbent_ver)
-        inc = promote.GateInput(fresh_auc=inc_auc, probes={},
-            anchor_auc=promote.evaluate_win_auc(inc_dir, anchor_files) if anchor_files else None)
+        inc = promote.GateInput(fresh_auc=inc_auc, probes={}, anchor_auc=None)
     result = promote.decide(cand, inc, cfg["promotion"], _halt_thresholds(cand_dir))
     print(f"[retrain] shadow gate: promote={result.promote} :: {result.reasons}")
 
