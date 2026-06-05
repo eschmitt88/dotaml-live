@@ -157,10 +157,17 @@ def _log_prequential(now: str, version: str, auc: float, n_days: int) -> None:
 
 def _refit_for_serving(candidate_ver: str, now: str) -> None:
     """After the gate passes, fine-tune the candidate the rest of the way through `now`
-    (fold in the eval days) so the served model has ~0 lag. GPU integration point —
-    until wired, the gated checkpoint (trained through train_cutoff) serves as-is."""
-    print(f"[retrain] NOTE: refit-for-serving ({candidate_ver} through {now}) is the "
-          "GPU integration point; gated checkpoint serves until wired.")
+    (fold in the eval days) so the served model has ~0 lag — extends the same version."""
+    from . import finetune
+    ft = config.training_config().get("finetune", {})
+    try:
+        finetune.run_finetune(registry.version_dir(candidate_ver), candidate_ver,
+                              train_cutoff=now, eval_dates=[now],
+                              epochs=max(1, int(ft.get("epochs", 3)) // 2),
+                              n_train_rows=int(ft.get("train_rows", 1_500_000)))
+        print(f"[retrain] refit-for-serving: {candidate_ver} extended through {now}")
+    except Exception as e:  # noqa: BLE001
+        print(f"[retrain] refit-for-serving failed ({e}); gated checkpoint serves as-is")
 
 
 def _keep_last_n() -> int:
@@ -172,13 +179,24 @@ def _keep_last_n() -> int:
 
 def _finetune(cfg: dict, incumbent_ver: str | None, pq, candidate_ver: str,
               timestamp: str) -> str | None:
-    """Warm-start fine-tune the incumbent on data through pq.train_cutoff (recency-
-    weighted), via the vendored train.py --resume. Returns the registered candidate
-    version, or None on failure. NOTE: wiring train's data config to the rolling store
-    + materializing the recency-weighted sample is the GPU-validated integration point."""
-    print("[retrain] NOTE: fine-tune execution is the GPU-validated integration point; "
-          "see retrain._finetune docstring. Skipping actual training in this orchestration.")
-    return None
+    """Warm-start fine-tune the incumbent on recency-weighted data through
+    pq.train_cutoff (full multi-task recipe). Returns the candidate version or None."""
+    if not incumbent_ver:
+        print("[retrain] no incumbent to warm-start from")
+        return None
+    from . import finetune          # lazy (avoid retrain<->finetune import cycle)
+    ft = cfg.get("finetune", {})
+    try:
+        finetune.run_finetune(registry.version_dir(incumbent_ver), candidate_ver,
+                              train_cutoff=pq.train_cutoff, eval_dates=pq.eval_dates(),
+                              epochs=int(ft.get("epochs", 3)),
+                              n_train_rows=int(ft.get("train_rows", 1_500_000)))
+        return candidate_ver
+    except Exception as e:  # noqa: BLE001
+        import traceback
+        traceback.print_exc()
+        print(f"[retrain] fine-tune failed: {e}")
+        return None
 
 
 def _load_probes(model_dir: Path) -> dict:

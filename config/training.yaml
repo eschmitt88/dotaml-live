@@ -4,6 +4,7 @@ base_config: "registry/v7-base/config.yaml"
 finetune:
   resume_from: live          # warm-start from the current live checkpoint
   epochs: 3                  # short nightly fine-tune (full from-scratch is ~25 ep / 5.7h)
+  train_rows: 1500000        # recency-weighted sample size for the fine-tune
   fresh_warmup_steps: 500    # cosine had decayed to min lr; re-warm briefly
   monitor_only_halt: true    # probe halt is advisory during fine-tune, not fatal
 

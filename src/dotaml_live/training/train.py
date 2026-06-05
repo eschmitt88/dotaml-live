@@ -106,7 +106,7 @@ class TrainResult:
 
 def _eval_pure_pregame_auc(model, loader, device, autocast_dtype) -> float:
     """Quick pure_pregame val_auc -- used for early-stop signal."""
-    from probes import _build_masks
+    from .probes import _build_masks
     model.eval()
     ys, ps = [], []
     with torch.no_grad():
