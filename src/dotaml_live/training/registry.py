@@ -20,7 +20,9 @@ from pathlib import Path
 
 from ..common import paths
 
-ARTIFACTS = ["hero_prior.npy", "duration_pmf.npz", "player_features.parquet"]
+ARTIFACTS = ["hero_prior.npy", "duration_pmf.npz", "player_features.parquet",
+             "hero_combos.json"]   # carried forward so the discovery tab never breaks;
+                                   # regenerated per-model post-promotion (precompute_combos)
 CORE = ["model.pt", "config.yaml", "item_vocab.json"]
 
 

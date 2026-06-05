@@ -1,6 +1,7 @@
 {
-  "live": "v7-base",
+  "live": "ft-2026-06-04",
   "versions": [
-    "v7-base"
+    "v7-base",
+    "ft-2026-06-04"
   ]
 }

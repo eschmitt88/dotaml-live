@@ -150,9 +150,10 @@ def run_finetune(incumbent_dir: Path, out_ver: str, train_cutoff: str,
 
         out_dir = registry.new_version_dir(out_ver)
         torch.save(model.state_dict(), out_dir / "model.pt")
-        shutil.copy2(incumbent_dir / "config.yaml", out_dir / "config.yaml")
-        shutil.copy2(incumbent_dir / "item_vocab.json", out_dir / "item_vocab.json")
-        registry.copy_artifacts_from(incumbent_dir.name, out_ver)
+        if out_dir.resolve() != incumbent_dir.resolve():   # not an in-place refit
+            shutil.copy2(incumbent_dir / "config.yaml", out_dir / "config.yaml")
+            shutil.copy2(incumbent_dir / "item_vocab.json", out_dir / "item_vocab.json")
+            registry.copy_artifacts_from(incumbent_dir.name, out_ver)
         import json
         (out_dir / "metrics.json").write_text(json.dumps({
             "val_auc_pure_pregame": tr.best_pure_pregame_auc,
