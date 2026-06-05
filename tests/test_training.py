@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dotaml_live.training.promote import decide, GateInput
 from dotaml_live.training.retrain import recency_weights
+from dotaml_live.pipeline.seal_holdout import prequential_window
 
 HALT = {"pure_pregame": {"value": 0.55, "direction": "below"},
         "gpm_probe": {"value": 0.30, "direction": "above"}}
@@ -35,6 +36,14 @@ def test_gate_rejects_on_probe_failure():
 
 def test_gate_bootstrap_promotes_without_incumbent():
     assert decide(_cand(0.60), None, CFG, HALT).promote is True
+
+
+def test_prequential_window():
+    w = prequential_window("2026-06-04", eval_days=7)
+    assert w.train_cutoff == "2026-05-28"            # candidate trains through here
+    assert w.eval_start == "2026-05-29" and w.eval_end == "2026-06-04"
+    assert len(w.eval_dates()) == 7
+    assert w.train_cutoff < w.eval_start             # no train/eval overlap (future-only eval)
 
 
 def test_recency_weights_recent_and_patch():

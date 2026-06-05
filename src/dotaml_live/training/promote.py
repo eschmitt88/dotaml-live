@@ -112,17 +112,16 @@ def _canonical_sort_batch(heroes: np.ndarray, feats: np.ndarray) -> tuple[np.nda
     return out_h, out_f
 
 
-def evaluate_win_auc(model_dir: Path, day_files: list[str], batch: int = 8192) -> float:
-    """Pure-pregame win AUC for a model over rolling-store player_features day files."""
+def _score_winauc(f, day_files: list[str], batch: int = 8192) -> tuple[float, int]:
+    """Pure-pregame win AUC + row count for a loaded model over day files."""
     import torch
     import pyarrow as pa
     import pyarrow.parquet as pq
     from sklearn.metrics import roc_auc_score
-    from ..model.v7_inference import V7Foundation, FEAT_NAMES
+    from ..model.v7_inference import FEAT_NAMES
 
     if not day_files:
-        return float("nan")
-    f = V7Foundation(model_dir=model_dir)
+        return float("nan"), 0
     tbl = pa.concat_tables([pq.read_table(p) for p in day_files])
     N = tbl.num_rows
     hero_cols = [f"{t}{j}" for t in ("r", "d") for j in range(5)]
@@ -141,7 +140,31 @@ def evaluate_win_auc(model_dir: Path, day_files: list[str], batch: int = 8192) -
         inp["player_feats"] = torch.from_numpy(feats[s:e]).to(f.device)
         out = f.predict(inputs=inp, masks=f.pure_pregame_mask(batch_size=B))
         probs[s:e] = out.win_prob().cpu().numpy()
-    return float(roc_auc_score(y, probs))
+    return float(roc_auc_score(y, probs)), N
+
+
+def evaluate_win_auc(model_dir: Path, day_files: list[str], batch: int = 8192) -> float:
+    """Pure-pregame win AUC for a model over rolling-store player_features day files."""
+    if not day_files:
+        return float("nan")
+    from ..model.v7_inference import V7Foundation
+    return _score_winauc(V7Foundation(model_dir=model_dir), day_files, batch)[0]
+
+
+def prequential_backtest(model_dir: Path, pf_dir: Path, dates: list[str]) -> list[dict]:
+    """Score a model on each day INDEPENDENTLY (test-then-train, ADR 0004). Honest only
+    for days after the model's training cutoff. Loads the model once. Returns a series
+    of {date, auc, n}."""
+    from ..model.v7_inference import V7Foundation
+    f = V7Foundation(model_dir=model_dir)
+    out = []
+    for d in dates:
+        fp = pf_dir / f"date={d}.parquet"
+        if not fp.exists():
+            continue
+        auc, n = _score_winauc(f, [str(fp)])
+        out.append({"date": d, "auc": round(auc, 4), "n": n})
+    return out
 
 
 def window_day_files(pf_dir: Path, lo: str, hi: str) -> list[str]:

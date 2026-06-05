@@ -28,7 +28,7 @@ import json
 import math
 from pathlib import Path
 
-from ..common import config
+from ..common import config, paths
 from ..pipeline import build_runner, rolling_store as rs, seal_holdout
 from . import promote, registry
 
@@ -77,54 +77,95 @@ def run_cycle(now: str | None = None, timestamp: str = "", train: bool = True,
     if now is None:
         return {"status": "no-data"}
 
-    # 2. seal walk-forward window
-    win = seal_holdout.compute_windows(now)
-    print(f"[retrain] sealed: train<= {win.train_end} | val {win.val_start}..{win.val_end} "
-          f"| test {win.test_start}..{win.test_end} (off-limits to search)")
+    # 2. prequential window — the most recent unseen days (ADR 0004)
+    pq = seal_holdout.prequential_window(now)
+    pf = rs.pf_dir()
+    eval_files = [str(pf / f"date={d}.parquet") for d in pq.eval_dates()
+                  if (pf / f"date={d}.parquet").exists()]
+    anchor = seal_holdout.frozen_anchor()
+    anchor_files = promote.window_day_files(pf, anchor["start_date"], anchor["end_date"])
+    print(f"[retrain] prequential: train<= {pq.train_cutoff} | eval {pq.eval_start}..{pq.eval_end} "
+          f"({len(eval_files)} unseen days)")
 
     incumbent_ver = registry.live_version()
 
-    # 3. fine-tune (warm-start from live). Validated separately on a GPU run.
-    candidate_ver = f"ft-{now}"
-    if train:
-        candidate_ver = _finetune(cfg, incumbent_ver, win, candidate_ver, timestamp)
-        if candidate_ver is None:
-            return {"status": "train-failed", "now": now}
-    else:
-        print("[retrain] train=False — gate-only dry run on the current live model")
-        candidate_ver = incumbent_ver
+    # 3. prequential MONITORING — score current live on the unseen eval window, log it
+    inc_auc = float("nan")
+    if incumbent_ver and eval_files:
+        inc_auc = promote.evaluate_win_auc(registry.version_dir(incumbent_ver), eval_files)
+        _log_prequential(now, incumbent_ver, inc_auc, len(eval_files))
+        print(f"[retrain] prequential live AUC ({incumbent_ver}): {inc_auc:.4f}")
 
-    # 5. GATE — head-to-head on the SAME fresh VAL window (test stays sealed for final pass)
-    pf = rs.pf_dir()
-    val_files = promote.window_day_files(pf, win.val_start, win.val_end)
-    anchor = seal_holdout.frozen_anchor()
-    anchor_files = promote.window_day_files(pf, anchor["start_date"], anchor["end_date"])
+    # 4. candidate fine-tune (warm-start through train_cutoff). GPU integration point.
+    if not train:
+        return {"status": "monitor-only", "now": now,
+                "eval_window": [pq.eval_start, pq.eval_end],
+                "prequential_live_auc": round(inc_auc, 4), "incumbent": incumbent_ver}
+    candidate_ver = _finetune(cfg, incumbent_ver, pq, f"ft-{now}", timestamp)
+    if candidate_ver is None:
+        return {"status": "train-skipped (GPU integration point)", "now": now,
+                "prequential_live_auc": round(inc_auc, 4)}
 
+    # 5. SHADOW GATE — candidate vs incumbent on the SAME unseen eval window
     cand_dir = registry.version_dir(candidate_ver)
-    cand_auc = promote.evaluate_win_auc(cand_dir, val_files) if val_files else float("nan")
-    cand_anchor = promote.evaluate_win_auc(cand_dir, anchor_files) if anchor_files else None
-    cand_probes = _load_probes(cand_dir)
-
+    cand = promote.GateInput(
+        fresh_auc=promote.evaluate_win_auc(cand_dir, eval_files) if eval_files else float("nan"),
+        probes=_load_probes(cand_dir),
+        anchor_auc=promote.evaluate_win_auc(cand_dir, anchor_files) if anchor_files else None)
     inc = None
     if incumbent_ver and incumbent_ver != candidate_ver:
         inc_dir = registry.version_dir(incumbent_ver)
-        inc = promote.GateInput(
-            fresh_auc=promote.evaluate_win_auc(inc_dir, val_files) if val_files else float("nan"),
-            probes={}, anchor_auc=promote.evaluate_win_auc(inc_dir, anchor_files) if anchor_files else None)
+        inc = promote.GateInput(fresh_auc=inc_auc, probes={},
+            anchor_auc=promote.evaluate_win_auc(inc_dir, anchor_files) if anchor_files else None)
+    result = promote.decide(cand, inc, cfg["promotion"], _halt_thresholds(cand_dir))
+    print(f"[retrain] shadow gate: promote={result.promote} :: {result.reasons}")
 
-    cand = promote.GateInput(fresh_auc=cand_auc, probes=cand_probes, anchor_auc=cand_anchor)
-    halt = _halt_thresholds(cand_dir)
-    result = promote.decide(cand, inc, cfg["promotion"], halt)
-    print(f"[retrain] gate: promote={result.promote} :: {result.reasons}")
-
-    # 6. promote + prune
-    if result.promote and train:
+    # 6. promote -> refit-for-serving through `now` (kill the lag) -> prune
+    if result.promote:
+        if config.splits_policy()["prequential"].get("refit_for_serving", True):
+            _refit_for_serving(candidate_ver, now)
         registry.set_live(candidate_ver)
         registry.prune(_keep_last_n())
         print(f"[retrain] PROMOTED {candidate_ver} -> live")
-    return {"status": "ok", "now": now, "candidate": candidate_ver,
-            "incumbent": incumbent_ver, "promote": result.promote,
-            "candidate_val_auc": cand_auc, "reasons": result.reasons}
+    return {"status": "ok", "now": now, "candidate": candidate_ver, "incumbent": incumbent_ver,
+            "promote": result.promote, "candidate_eval_auc": round(cand.fresh_auc, 4),
+            "incumbent_eval_auc": round(inc_auc, 4), "reasons": result.reasons}
+
+
+def prequential_monitor(now: str | None = None, eval_days: int | None = None) -> dict:
+    """Score the current live model on the most recent unseen day(s) and log it.
+    Runnable independently of retraining (e.g. a daily cron) — the lag-free health metric."""
+    now = now or _latest_day()
+    if now is None:
+        return {"status": "no-data"}
+    pq = seal_holdout.prequential_window(now, eval_days)
+    pf = rs.pf_dir()
+    files = [str(pf / f"date={d}.parquet") for d in pq.eval_dates()
+             if (pf / f"date={d}.parquet").exists()]
+    ver = registry.live_version()
+    mdir = registry.version_dir(ver) if ver else paths.live_model_dir()
+    auc = promote.evaluate_win_auc(mdir, files) if files else float("nan")
+    _log_prequential(now, ver or mdir.name, auc, len(files))
+    return {"now": now, "eval_window": [pq.eval_start, pq.eval_end], "version": ver,
+            "eval_auc": round(float(auc), 4), "n_days": len(files)}
+
+
+def _log_prequential(now: str, version: str, auc: float, n_days: int) -> None:
+    import json
+    from ..common import paths
+    p = paths.DATA_DIR / "prequential.jsonl"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with open(p, "a") as fh:
+        fh.write(json.dumps({"cycle": now, "version": version,
+                             "eval_auc": round(float(auc), 4), "n_days": n_days}) + "\n")
+
+
+def _refit_for_serving(candidate_ver: str, now: str) -> None:
+    """After the gate passes, fine-tune the candidate the rest of the way through `now`
+    (fold in the eval days) so the served model has ~0 lag. GPU integration point —
+    until wired, the gated checkpoint (trained through train_cutoff) serves as-is."""
+    print(f"[retrain] NOTE: refit-for-serving ({candidate_ver} through {now}) is the "
+          "GPU integration point; gated checkpoint serves until wired.")
 
 
 def _keep_last_n() -> int:
@@ -134,12 +175,12 @@ def _keep_last_n() -> int:
     return int((b.get("registry", {}) or {}).get("keep_last_n", 10))
 
 
-def _finetune(cfg: dict, incumbent_ver: str | None, win, candidate_ver: str,
+def _finetune(cfg: dict, incumbent_ver: str | None, pq, candidate_ver: str,
               timestamp: str) -> str | None:
-    """Shell out to the vendored train.py with --resume. Returns the registered
-    candidate version, or None on failure. NOTE: wiring train's data config to the
-    rolling store + materializing the recency-weighted sample is the step to validate
-    on a real GPU run; left as the documented integration point."""
+    """Warm-start fine-tune the incumbent on data through pq.train_cutoff (recency-
+    weighted), via the vendored train.py --resume. Returns the registered candidate
+    version, or None on failure. NOTE: wiring train's data config to the rolling store
+    + materializing the recency-weighted sample is the GPU-validated integration point."""
     print("[retrain] NOTE: fine-tune execution is the GPU-validated integration point; "
           "see retrain._finetune docstring. Skipping actual training in this orchestration.")
     return None

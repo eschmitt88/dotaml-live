@@ -12,13 +12,23 @@ date_format: "YYYY-MM-DD"
 dedup_key: match_id
 hero_id_range: [1, 150]
 
-# --- walk-forward policy (relative to each cycle's "now" = latest complete day) ---
+# --- prequential (test-then-train) evaluation — see docs/decisions/0004 ---
+# The live model is scored on each new day BEFORE that day is folded into training
+# (lag-free, honest). Promotion is a shadow head-to-head on the most recent eval_days
+# the candidate hasn't trained on; after promotion the model is refit through "now"
+# for serving (serving lag ~1 day). This replaces the walk_forward static holdout.
+prequential:
+  eval_days: 7           # evaluation horizon (candidate trained through now-eval_days
+                         # for the gate; ~1.3M Turbo matches). NOT serving staleness.
+  refit_for_serving: true   # after promotion, fine-tune the rest of the way through now
+
+# --- LEGACY walk-forward policy (retained for the informational `split` column /
+#     backward compat; no longer the promotion signal — superseded by `prequential`) ---
 walk_forward:
-  test_days: 14          # freshest window sealed as test (promotion signal)
-  val_days: 14           # block before test (search/early-stop signal)
-  embargo_days: 1        # gap between train_end and val/test start (aggregator carries
-                         # player history forward — prevents adjacent-day label leak)
-  train_history: all     # train on everything older than val (recency-weighted, not truncated)
+  test_days: 14
+  val_days: 14
+  embargo_days: 1
+  train_history: all
 
 # --- frozen anchor: a tiny fixed slice kept ONLY as a regression tripwire ---
 # Not the promotion signal. Inherited from the original 7.40 sealed test window.

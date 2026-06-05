@@ -79,3 +79,33 @@ def seal(now_date: str | dt.date, cycle_dir: str | Path | None = None) -> Window
 def frozen_anchor() -> dict:
     """The tiny fixed regression-tripwire slice (not the promotion signal)."""
     return config.splits_policy()["frozen_anchor"]
+
+
+# ----- prequential (test-then-train) evaluation — ADR 0004 -----
+
+
+@dataclass
+class Prequential:
+    now: str
+    train_cutoff: str        # candidate trains through this (inclusive) for the gate
+    eval_start: str          # first unseen eval day
+    eval_end: str            # = now
+
+    def eval_dates(self) -> list[str]:
+        d, out = _d(self.eval_start), []
+        while d <= _d(self.eval_end):
+            out.append(_s(d)); d += dt.timedelta(days=1)
+        return out
+
+
+def prequential_window(now: str | dt.date, eval_days: int | None = None) -> Prequential:
+    """The most recent `eval_days` days form the prequential eval window (scored on
+    data the candidate hasn't trained on); the candidate trains through the day before.
+    """
+    if eval_days is None:
+        eval_days = int(config.splits_policy()["prequential"]["eval_days"])
+    now = _d(now) if isinstance(now, str) else now
+    eval_start = now - dt.timedelta(days=eval_days - 1)
+    train_cutoff = eval_start - dt.timedelta(days=1)
+    return Prequential(now=_s(now), train_cutoff=_s(train_cutoff),
+                       eval_start=_s(eval_start), eval_end=_s(now))
