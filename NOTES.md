@@ -92,3 +92,34 @@ Did / Findings / Next, appended per session (mirrors the research-repo disciplin
 - The one remaining step: wire train.py's data config to the rolling store +
   recency-resample, run the first warm-start fine-tune, confirm the gate promotes.
 - Then enable the nightly retrain timer. Swapfile can be reclaimed.
+
+## 2026-06-05 — prequential eval, 7.41 patch-awareness, shadow-gate validated
+
+### Did
+- Replaced the static walk-forward holdout with **prequential (test-then-train)**
+  evaluation (ADR 0004): score live on each new day before training on it; shadow
+  head-to-head gate; refit-for-serving. Backtest of v7-base surfaced a real ~0.02 AUC
+  drop at 2026-03-25.
+- That drop = **patch 7.41**. Found the model was patch-blind (train.py discarded
+  patch_id; no patch embedding; edges stopped at 7.40). ADR 0005: dropped the frozen
+  anchor (a pre-7.41 slice can block adaptation), re-pointed recency to 2026-03-25
+  (upweight 1.8), and added a **zero-init patch embedding** + 7.41 edge (v7-base
+  byte-identical, verified; activates on retrain).
+- Built `scripts/simulate_live.py` and ran a **3-day live-loop simulation** (warm-start
+  fine-tune from incumbent → shadow-eval on the unseen day → promote).
+
+### Findings — the shadow gate works
+| day | incumbent AUC | candidate AUC | promote |
+|---|---|---|---|
+| 06-02 | 0.6382 (v7-base) | 0.6529 | **yes** (+0.015, recovers most of the 7.41 gap) |
+| 06-03 | 0.6540 | 0.6545 | no (+0.0004 < margin — gate resists churn) |
+| 06-04 | 0.6507 | 0.6521 | **yes** (+0.0014) |
+
+- Fine-tune sets came out ~90% patch-4 (7.41) via recency+current-patch upweight, as
+  designed. A patch-aware fine-tune lifts unseen-day AUC 0.638→0.653 (≈ pre-7.41 level).
+- Gate promotes real gains, rejects marginal ones, chains the incumbent correctly.
+
+### Next
+- Productionize the fine-tune (full multi-task train.py recipe + refit-for-serving)
+  in retrain._finetune; the lean sim used a win-head-only fine-tune.
+- Enable the nightly retrain timer once the production fine-tune is wired.
