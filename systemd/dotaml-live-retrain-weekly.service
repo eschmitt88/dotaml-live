@@ -1,0 +1,12 @@
+# Weekly FROM-SCRATCH retrain (resets warm-start drift; re-anchors on the full window).
+# Replaces Sunday's nightly fine-tune (the nightly timer skips Sunday).
+[Unit]
+Description=dotaml-live weekly from-scratch retrain (full window, gated promotion)
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/mnt/projects/dotaml-live
+ExecStart=/mnt/projects/dotaml-live/.venv/bin/python -u -m dotaml_live.training.retrain --weekly
+Environment=PYTHONUNBUFFERED=1
+TimeoutStartSec=10h

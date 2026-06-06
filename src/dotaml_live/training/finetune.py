@@ -82,10 +82,12 @@ def _materialize(train_cutoff: str, eval_dates: list[str], tmp: Path,
 
 def run_finetune(incumbent_dir: Path, out_ver: str, train_cutoff: str,
                  eval_dates: list[str], epochs: int, n_train_rows: int,
-                 lr: float = 2e-4, warmup_steps: int = 500) -> Path:
-    """Warm-start the incumbent and run the full multi-task recipe; register the
-    candidate version (model.pt + config + vocab + carried-forward artifacts +
-    metrics.json). Returns the version dir."""
+                 lr: float = 2e-4, warmup_steps: int = 500, warm_start: bool = True) -> Path:
+    """Run the full multi-task recipe on materialized rolling-store data and register
+    the candidate version (model.pt + config + vocab + carried-forward artifacts +
+    metrics.json). warm_start=True loads the incumbent weights (nightly fine-tune);
+    warm_start=False trains from random init (weekly from-scratch). `incumbent_dir`
+    always supplies config/vocab/artifacts. Returns the version dir."""
     cfg = config.training_config()
     base_cfg = __import__("yaml").safe_load((incumbent_dir / "config.yaml").read_text())
     seed = int(base_cfg.get("seed", 42))
@@ -113,10 +115,13 @@ def run_finetune(incumbent_dir: Path, out_ver: str, train_cutoff: str,
         model = build_model(mhp, vocab_size=int(base_cfg["hero"]["vocab_size"]),
                             n_player_feats=n_pf, item_vocab_size=item_vocab_size,
                             patch_vocab_size=int(base_cfg.get("patch", {}).get("vocab_size", 8))).to(device)
-        sd = torch.load(incumbent_dir / "model.pt", map_location="cpu", weights_only=True)
-        missing, unexpected = model.load_state_dict(sd, strict=False)
-        assert not unexpected and set(missing) <= {"patch_embed.weight"}, (missing, unexpected)
-        print(f"[finetune] warm-started from {incumbent_dir.name} ({count_params(model)['total']:,} params)")
+        if warm_start:
+            sd = torch.load(incumbent_dir / "model.pt", map_location="cpu", weights_only=True)
+            missing, unexpected = model.load_state_dict(sd, strict=False)
+            assert not unexpected and set(missing) <= {"patch_embed.weight"}, (missing, unexpected)
+            print(f"[finetune] warm-started from {incumbent_dir.name} ({count_params(model)['total']:,} params)")
+        else:
+            print(f"[finetune] FROM SCRATCH (random init, {count_params(model)['total']:,} params)")
 
         sc = base_cfg["scenarios"]["distribution"]
         sampler = ScenarioSampler(

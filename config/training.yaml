@@ -15,11 +15,13 @@ recency:
   current_patch_start: "2026-03-25"   # 7.41 boundary — defines "current patch"
   current_patch_upweight: 1.8   # psi: bump post-patch matches harder right after a patch
 
-# Weekly from-scratch anchor retrain to bound long-run drift/forgetting.
+# Weekly from-scratch anchor retrain to bound long-run drift/forgetting (run via
+# `retrain --weekly`; the Sunday timer replaces that day's nightly fine-tune).
 anchor_retrain:
   enabled: true
   schedule: weekly
   epochs: 25
+  train_rows: 5000000      # full recency-weighted window for the from-scratch retrain
 
 promotion:
   beat_incumbent_margin: 0.0005   # candidate must beat incumbent on the prequential window by >= this

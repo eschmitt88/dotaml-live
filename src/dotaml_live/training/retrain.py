@@ -61,7 +61,7 @@ def _latest_day() -> str | None:
 
 
 def run_cycle(now: str | None = None, timestamp: str = "", train: bool = True,
-              update_data: bool = True) -> dict:
+              update_data: bool = True, from_scratch: bool = False) -> dict:
     cfg = config.training_config()
     # 0+1. pull new blobs from Azure (if available), then update the rolling store
     if update_data:
@@ -94,12 +94,14 @@ def run_cycle(now: str | None = None, timestamp: str = "", train: bool = True,
         _log_prequential(now, incumbent_ver, inc_auc, len(eval_files))
         print(f"[retrain] prequential live AUC ({incumbent_ver}): {inc_auc:.4f}")
 
-    # 4. candidate fine-tune (warm-start through train_cutoff). GPU integration point.
+    # 4. candidate training. Nightly: warm-start fine-tune. Weekly: from-scratch.
     if not train:
         return {"status": "monitor-only", "now": now,
                 "eval_window": [pq.eval_start, pq.eval_end],
                 "prequential_live_auc": round(inc_auc, 4), "incumbent": incumbent_ver}
-    candidate_ver = _finetune(cfg, incumbent_ver, pq, f"ft-{now}", timestamp)
+    print(f"[retrain] mode: {'WEEKLY from-scratch' if from_scratch else 'nightly warm-start'}")
+    candidate_ver = _finetune(cfg, incumbent_ver, pq, f"{'fs' if from_scratch else 'ft'}-{now}",
+                              timestamp, from_scratch=from_scratch)
     if candidate_ver is None:
         return {"status": "train-skipped (GPU integration point)", "now": now,
                 "prequential_live_auc": round(inc_auc, 4)}
@@ -190,24 +192,30 @@ def _keep_last_n() -> int:
 
 
 def _finetune(cfg: dict, incumbent_ver: str | None, pq, candidate_ver: str,
-              timestamp: str) -> str | None:
-    """Warm-start fine-tune the incumbent on recency-weighted data through
-    pq.train_cutoff (full multi-task recipe). Returns the candidate version or None."""
+              timestamp: str, from_scratch: bool = False) -> str | None:
+    """Train a candidate on recency-weighted data through pq.train_cutoff (full
+    multi-task recipe). Nightly warm-starts from the incumbent; weekly trains from
+    scratch (more epochs / full window) to reset warm-start drift. `incumbent_ver`
+    supplies config/vocab/artifacts even from-scratch. Returns the version or None."""
     if not incumbent_ver:
-        print("[retrain] no incumbent to warm-start from")
+        print("[retrain] no source model for config/vocab")
         return None
     from . import finetune          # lazy (avoid retrain<->finetune import cycle)
     ft = cfg.get("finetune", {})
+    ar = cfg.get("anchor_retrain", {})
+    epochs = int(ar.get("epochs", 25) if from_scratch else ft.get("epochs", 3))
+    rows = int(ar.get("train_rows", 5_000_000) if from_scratch else ft.get("train_rows", 1_500_000))
+    lr, warmup = (1e-3, 1000) if from_scratch else (2e-4, 500)   # from-scratch needs more
     try:
         finetune.run_finetune(registry.version_dir(incumbent_ver), candidate_ver,
                               train_cutoff=pq.train_cutoff, eval_dates=pq.eval_dates(),
-                              epochs=int(ft.get("epochs", 3)),
-                              n_train_rows=int(ft.get("train_rows", 1_500_000)))
+                              epochs=epochs, n_train_rows=rows, lr=lr, warmup_steps=warmup,
+                              warm_start=not from_scratch)
         return candidate_ver
     except Exception as e:  # noqa: BLE001
         import traceback
         traceback.print_exc()
-        print(f"[retrain] fine-tune failed: {e}")
+        print(f"[retrain] training failed: {e}")
         return None
 
 
@@ -232,9 +240,13 @@ def main() -> None:
     ap.add_argument("--no-train", action="store_true", help="gate-only dry run")
     ap.add_argument("--no-update", action="store_true", help="skip rolling-store update")
     ap.add_argument("--timestamp", default="", help="ISO timestamp stamped into the manifest")
+    ap.add_argument("--weekly", action="store_true",
+                    help="from-scratch full retrain (resets warm-start drift) instead of "
+                         "the nightly warm-start fine-tune")
     args = ap.parse_args()
     out = run_cycle(now=args.now, timestamp=args.timestamp,
-                    train=not args.no_train, update_data=not args.no_update)
+                    train=not args.no_train, update_data=not args.no_update,
+                    from_scratch=args.weekly)
     print(f"[retrain] cycle: {out}")
 
 

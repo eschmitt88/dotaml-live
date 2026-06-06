@@ -1,0 +1,10 @@
+[Unit]
+Description=Weekly dotaml-live from-scratch retrain (Sundays)
+
+[Timer]
+OnCalendar=Sun *-*-* 04:00:00
+Persistent=true
+RandomizedDelaySec=600
+
+[Install]
+WantedBy=timers.target

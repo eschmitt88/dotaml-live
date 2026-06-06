@@ -2,8 +2,10 @@
 Description=Nightly dotaml-live retrain cycle
 
 [Timer]
-OnCalendar=*-*-* 04:00:00
-Persistent=true          # catch up if the machine was off at the scheduled time
+# Mon-Sat at 04:00; Sunday is the from-scratch weekly retrain instead.
+OnCalendar=Mon..Sat *-*-* 04:00:00
+# Catch up if the machine was off at the scheduled time.
+Persistent=true
 RandomizedDelaySec=600
 
 [Install]
