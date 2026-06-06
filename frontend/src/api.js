@@ -23,4 +23,5 @@ export const api = {
   itemBuild: (b) => post('/api/item-build', b),
   heroCombos: (b) => post('/api/hero-combos', b),
   combosTable: () => get('/api/combos-table'),
+  patchStatus: () => get('/api/patch-status'),
 }

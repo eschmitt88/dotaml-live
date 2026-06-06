@@ -75,7 +75,8 @@ PATCH_START_DATE = dt.date.fromisoformat("2025-12-16")  # 7.40 boundary
 
 # Hand-curated patch_id schedule (kept in sync with data.py:_patch_id_from_dates).
 # (start_date_iso, patch_id) -- assigned by np.searchsorted right-side.
-PATCH_EDGES = [("2025-08-01", 2), ("2025-09-10", 3), ("2025-12-16", 1), ("2026-03-25", 4)]  # 7.41
+from ..common import patches as _patches  # noqa: E402
+PATCH_EDGES = _patches.edges()   # single source of truth: config/patches.yaml
 
 ANON_IDS = {0, 4294967295}
 
@@ -128,12 +129,8 @@ def player_source_cols() -> list[str]:
 
 
 def patch_id_for(date_str: str, default: int = 1) -> int:
-    """Match data.py:_patch_id_from_dates exactly for a single date."""
-    out = default
-    for edge_date, edge_pid in PATCH_EDGES:
-        if date_str >= edge_date:
-            out = edge_pid
-    return out
+    """Single date -> patch_id, from the central registry (config/patches.yaml)."""
+    return _patches.patch_id_for(date_str)
 
 
 def is_forfeit(radiant_win: bool, ts_radiant: int, ts_dire: int) -> bool:

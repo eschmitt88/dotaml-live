@@ -73,6 +73,17 @@ def run_cycle(now: str | None = None, timestamp: str = "", train: bool = True,
             print(f"[retrain] blob pull skipped: {e}")
         stats = build_runner.run()
         print(f"[retrain] rolling store updated: {stats}")
+        # patch watch — surface a new patch so its date enters the edge list (we do NOT
+        # retrain off-cadence on it; the cadence adapts as the data accumulates)
+        try:
+            from ..pipeline import patch_watch
+            st = patch_watch.check()
+            if st.get("checked") and st["new_patches"]:
+                names = [(p["name"], p["date"]) for p in st["new_patches"]]
+                print(f"[retrain] ** NEW PATCH(ES) detected, not in edge list: {names} — "
+                      f"add via `python -m dotaml_live.pipeline.patch_watch --add` **")
+        except Exception as e:  # noqa: BLE001
+            print(f"[retrain] patch check skipped: {e}")
     now = now or _latest_day()
     if now is None:
         return {"status": "no-data"}

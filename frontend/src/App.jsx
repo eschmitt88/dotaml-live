@@ -253,17 +253,27 @@ export default function App() {
   const [model, setModel] = useState(null)
   const [err, setErr] = useState(null)
   const [tab, setTab] = useState('draft')
+  const [patch, setPatch] = useState(null)
 
   useEffect(() => {
     api.meta().then(setMeta).catch((e) => setErr(String(e)))
     api.model().then(setModel).catch(() => {})
+    api.patchStatus().then(setPatch).catch(() => {})
   }, [])
 
   if (err && !meta) return <div className="app"><p className="err">Cannot reach API: {err}</p></div>
   if (!meta) return <div className="app"><p>Loading…</p></div>
 
+  const newPatches = patch?.new_patches ?? []
+
   return (
     <div className="app">
+      {newPatches.length > 0 && (
+        <div className="patch-banner">
+          ⚠ New Dota patch detected: {newPatches.map((p) => `${p.name} (${p.date})`).join(', ')}
+          {' '}— not yet in the edge list. Run <code>python -m dotaml_live.pipeline.patch_watch --add</code>.
+        </div>
+      )}
       <header>
         <h1>dotaml-live <span className="tag">Turbo</span></h1>
         <nav className="tabs">

@@ -1,0 +1,13 @@
+# Patch -> patch_id mapping. THE single source of truth for patch edges (was hardcoded
+# in build_features/data.py). patch_id is a small embedding slot (model patch_vocab=8).
+# "matches on/after `date` belong to this patch." Add new patches here, or let
+# `pipeline/patch_watch.py` append them (it diffs against OpenDota's patch list).
+#
+# Note: 7.41's OpenDota timestamp is 2026-03-24; the edge is 2026-03-25 (first full day
+# of 7.41 data — where the prequential AUC drop was cleanest).
+default_patch_id: 1
+edges:
+  - {date: "2025-08-01", patch_id: 2, name: "pre-7.40-a"}
+  - {date: "2025-09-10", patch_id: 3, name: "pre-7.40-b"}
+  - {date: "2025-12-16", patch_id: 1, name: "7.40"}
+  - {date: "2026-03-25", patch_id: 4, name: "7.41"}

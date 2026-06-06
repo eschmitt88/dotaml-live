@@ -79,6 +79,14 @@ def hero_combos(req: HeroCombosReq, request: Request):
     return {"mode": req.mode, "size": req.size, "combos": [asdict(c) for c in combos]}
 
 
+@router.get("/patch-status")
+def patch_status():
+    """Latest patch-watch result (data/patch_status.json, refreshed by the nightly
+    cycle / `patch_watch` CLI). Drives the 'new patch' banner."""
+    from ...pipeline import patch_watch
+    return patch_watch.load_status()
+
+
 @router.get("/combos-table")
 def combos_table(request: Request):
     """Precomputed all-pairs discovery table (synergy + kills/min). Draft-independent;

@@ -8,6 +8,9 @@ header h1 { margin:0; font-size:22px; }
 .model { color:var(--mut); font-size:12px; }
 h2 { font-size:15px; color:var(--mut); text-transform:uppercase; letter-spacing:.05em; }
 .err { color:var(--red); background:#2a1416; padding:8px 12px; border-radius:6px; }
+.patch-banner { background:#3a2e0c; border:1px solid #6b5413; color:#f0d98a; padding:8px 14px;
+  border-radius:6px; margin-bottom:12px; font-size:13px; }
+.patch-banner code { background:#0c1116; padding:1px 5px; border-radius:4px; }
 
 .teams { display:flex; gap:24px; }
 .team { flex:1; }

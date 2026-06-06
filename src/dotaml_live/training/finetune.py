@@ -51,15 +51,17 @@ def _materialize(train_cutoff: str, eval_dates: list[str], tmp: Path,
                  n_train_rows: int, lookback_days: int, seed: int = 0) -> None:
     """Write tmp/pf/{train,val}.parquet + tmp/rich/{train,val}.parquet from the rolling
     store. Train = recency-resampled days <= cutoff; val = eval_dates (full)."""
+    from ..common import patches
     rcfg = config.training_config()["recency"]
     rng = np.random.default_rng(seed)
     (tmp / "pf").mkdir(parents=True, exist_ok=True)
     (tmp / "rich").mkdir(parents=True, exist_ok=True)
 
     # --- train: recency-weighted sample of days <= cutoff (pf + rich row-aligned) ---
+    # current-patch boundary auto-tracks the latest edge in config/patches.yaml
     days = [d for d in _all_pf_days() if d <= train_cutoff][-lookback_days:]
     w = recency_weights(days, rcfg["half_life_days"], rcfg["current_patch_upweight"],
-                        rcfg["current_patch_start"], now=train_cutoff)
+                        patches.current_patch_start(), now=train_cutoff)
     wv = np.array([w[d] for d in days], dtype=np.float64)
     alloc = np.maximum(1, np.round(n_train_rows * wv / wv.sum()).astype(int))
     pf_parts, rich_parts = [], []
