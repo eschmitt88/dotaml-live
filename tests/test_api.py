@@ -33,9 +33,12 @@ def draft():
 
 
 def test_health_model_meta(client):
+    from dotaml_live.training import registry
     assert client.get("/health").json()["status"] == "ok"
     m = client.get("/model").json()
-    assert m["version"] == "v7-base" and m["item_vocab_size"] == 305
+    # serves whatever is currently promoted (v7-base, or a fine-tuned ft-* model)
+    assert m["version"] == (registry.live_version() or "v7-base")
+    assert m["item_vocab_size"] == 305
     meta = client.get("/meta").json()
     assert len(meta["heroes"]) > 100 and len(meta["items"]) > 100
 

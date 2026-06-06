@@ -115,11 +115,12 @@ def run_cycle(now: str | None = None, timestamp: str = "", train: bool = True,
     result = promote.decide(cand, inc, cfg["promotion"], _halt_thresholds(cand_dir))
     print(f"[retrain] shadow gate: promote={result.promote} :: {result.reasons}")
 
-    # 6. promote -> refit-for-serving through `now` (kill the lag) -> prune
+    # 6. promote -> refit-for-serving through `now` (kill the lag) -> regen combos -> prune
     if result.promote:
         if config.splits_policy()["prequential"].get("refit_for_serving", True):
             _refit_for_serving(candidate_ver, now)
         registry.set_live(candidate_ver)
+        _regen_combos(candidate_ver)        # discovery table is model-specific
         registry.prune(_keep_last_n())
         print(f"[retrain] PROMOTED {candidate_ver} -> live")
     return {"status": "ok", "now": now, "candidate": candidate_ver, "incumbent": incumbent_ver,
@@ -153,6 +154,17 @@ def _log_prequential(now: str, version: str, auc: float, n_days: int) -> None:
     with open(p, "a") as fh:
         fh.write(json.dumps({"cycle": now, "version": version,
                              "eval_auc": round(float(auc), 4), "n_days": n_days}) + "\n")
+
+
+def _regen_combos(version: str) -> None:
+    """Regenerate the discovery combos for a promoted model (they're model-specific).
+    The dashboard then serves the new model's combos on its next request, no restart."""
+    try:
+        from ..queries.combos_precompute import build_table
+        build_table(registry.version_dir(version))
+        print(f"[retrain] regenerated discovery combos for {version}")
+    except Exception as e:  # noqa: BLE001
+        print(f"[retrain] combos regen failed ({e}); discovery tab keeps carried-forward table")
 
 
 def _refit_for_serving(candidate_ver: str, now: str) -> None:
