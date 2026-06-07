@@ -305,6 +305,21 @@ class V7Foundation:
             inputs["player_feats"][0, :, :] = torch.tensor(
                 player_feats, dtype=torch.float32, device=self.device)
 
+        # Guard against hero IDs outside the model's trained vocab (e.g. heroes
+        # added in a patch newer than this checkpoint, like id 155). Feeding such
+        # an id into the hero embedding triggers a CUDA device-side assert that
+        # poisons the whole process. Map them to PAD(0) and mark the slot as a
+        # masked "unknown hero" — exactly v7's trained partial-draft scenario —
+        # so predictions degrade gracefully instead of crashing. The patch-status
+        # banner surfaces the underlying "model behind on heroes" condition.
+        hid = inputs["hero_ids"]
+        bad = (hid >= self.n_heroes) | (hid < 0)
+        if bool(bad.any()):
+            inputs["hero_ids"] = torch.where(bad, torch.zeros_like(hid), hid)
+            hm = masks.get("hero") if masks is not None else None
+            if hm is not None:
+                masks = {**masks, "hero": hm | bad}
+
         out = self.model(
             inputs["hero_ids"], inputs["player_feats"], inputs["items"],
             inputs["kills"], inputs["deaths"], inputs["assists"],

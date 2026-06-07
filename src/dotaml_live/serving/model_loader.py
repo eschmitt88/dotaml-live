@@ -77,5 +77,6 @@ class ModelHolder:
             "device": self.device,
             "model_dir": str(self._dir) if self._dir else None,
             "item_vocab_size": self._f.item_vocab_size if self._f else None,
+            "n_heroes": self._f.n_heroes if self._f else None,   # hero ids >= this are unsupported
             "manifest": manifest,
         }
