@@ -2,6 +2,39 @@
 
 Did / Findings / Next, appended per session (mirrors the research-repo discipline).
 
+## 2026-06-07 — dashboard redesign + out-of-vocab hero crash
+
+### Did
+- **Dashboard redesign** (Draft analysis tab). Searchable/alphabetical/clearable hero
+  combobox (Tab commits the highlight), prominent Radiant/Dire toggle, player assignment
+  via popover (Alaric / "wuts a dota", account IDs persisted to localStorage), asymmetric
+  layout (Top hero picks dominant + click-to-assign, compact win-prob, full-height item
+  build), debounced auto-recompute, favorites strip with contextual win%, Clear-all,
+  swap-sides, and an add-to-draft button on combo-discovery rows.
+- **Fixed a serving outage** caused by a hero id outside the model's hero vocab.
+
+### Findings — Largo (id 155, patch 7.40) was crashing serving
+- Hero embedding is `vocab_size=151` (ids 0–150). **Largo (155), added in 7.40**, overflows
+  it → CUDA **device-side assert**, which poisons the whole CUDA context, so *every*
+  endpoint 500s until restart (not just the offending call). Auto-recompute made it trivial
+  to trigger by selecting Largo.
+- Largo is also **silently dropped from features/training**: `build_features_extended.py` and
+  `data.py` hard-filter heroes to `[1,150]`. So the model has never seen 7.40 Largo games —
+  he's invisible, not just unsupported. Recorded in **ADR 0007**.
+
+### Fixes shipped (committed + pushed)
+- `predict()` maps out-of-vocab hero ids → PAD(0) + masked "unknown hero" (trained
+  partial-draft scenario) — permanent crash guard for any future hero.
+- Serving reads `hero.vocab_size` from the checkpoint config (fallback 151) instead of
+  hardcoding, so a future expanded-vocab model loads cleanly. `/model` exposes `n_heroes`;
+  the picker marks ids ≥ `n_heroes` as "not in model".
+
+### Next — to actually include Largo (needs a retrain; see ADR 0007)
+- Bump `hero.id_max`/`vocab_size` (e.g. 160/161, headroom), wire the two `[1,150]` guards to
+  config-driven `id_max`, re-extract features so 7.40 Largo games enter the tables.
+- Add hero-embedding **resize** to finetune warm-start (copy overlap rows, init new).
+- Retrain via `/plan` in a worktree; head-to-head gate backstops correctness.
+
 ## 2026-06-04 — scaffold + Phase 1 dashboard
 
 ### Did

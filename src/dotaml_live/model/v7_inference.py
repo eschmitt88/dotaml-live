@@ -186,10 +186,15 @@ class V7Foundation:
         # Reverse map for queries that want raw item_id given vocab_idx
         self.vocab_idx_to_item_id = {int(v): int(k) for k, v in self.item_vocab.items()}
 
-        # Build model (v7's build_model signature is simpler than v4's)
+        # Build model (v7's build_model signature is simpler than v4's).
+        # Hero vocab is read from the checkpoint's own config so serving tracks
+        # whatever vocab the promoted model was trained with — a future retrain
+        # that expands the hero vocab (e.g. to include patch-7.40 heroes like
+        # Largo, id 155) loads without a size mismatch. Falls back to 151 for
+        # older configs that predate this field.
         self.model = v7_models.build_model(
             hp=self.hp,
-            vocab_size=151,
+            vocab_size=int(self.cfg.get("hero", {}).get("vocab_size", 151)),
             n_player_feats=8,
             item_vocab_size=self.item_vocab_size,
             patch_vocab_size=int(self.cfg.get("patch", {}).get("vocab_size", 8)),
