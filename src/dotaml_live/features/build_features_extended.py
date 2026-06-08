@@ -77,6 +77,9 @@ PATCH_START_DATE = dt.date.fromisoformat("2025-12-16")  # 7.40 boundary
 # (start_date_iso, patch_id) -- assigned by np.searchsorted right-side.
 from ..common import patches as _patches  # noqa: E402
 PATCH_EDGES = _patches.edges()   # single source of truth: config/patches.yaml
+from ..common import config as _config  # noqa: E402
+_HERO = _config.hero_config()    # single source of truth: config/training.yaml `hero:`
+HERO_ID_MIN, HERO_ID_MAX = _HERO["id_min"], _HERO["id_max"]
 
 ANON_IDS = {0, 4294967295}
 
@@ -667,8 +670,8 @@ def main() -> int:
             players = m["players"]
             accts = [int(p.get("account_id") or 0) for p in players]
             heroes = [int(p.get("hero_id") or 0) for p in players]
-            # Hero-id sanity (matches plateau-baseline rule).
-            if any(h < 1 or h > 150 for h in heroes):
+            # Hero-id sanity — range from config/training.yaml `hero:` (ADR 0007).
+            if any(h < HERO_ID_MIN or h > HERO_ID_MAX for h in heroes):
                 continue
 
             # Emit the row (filter set is now inline — every passing match

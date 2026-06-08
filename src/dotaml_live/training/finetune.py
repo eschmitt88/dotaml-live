@@ -82,6 +82,28 @@ def _materialize(train_cutoff: str, eval_dates: list[str], tmp: Path,
     pq.write_table(pa.concat_tables(val_rich), tmp / "rich" / "val.parquet")
 
 
+def _grow_hero_embed(sd: dict, model) -> int:
+    """Grow the saved hero embedding to match the target model when the hero vocab
+    was bumped (e.g. for a new patch hero — ADR 0007): keep the learned rows, init
+    the new rows from the model's fresh init. Returns rows added (0 if unchanged).
+    Refuses to shrink. Lets a warm-start across a vocab bump load cleanly rather than
+    erroring on a shape mismatch."""
+    key = "hero_embed.weight"
+    if key not in sd:
+        return 0
+    old = sd[key]
+    new_rows = int(model.hero_embed.weight.shape[0])
+    old_rows = int(old.shape[0])
+    if old_rows == new_rows:
+        return 0
+    if old_rows > new_rows:
+        raise ValueError(f"refusing to shrink hero vocab {old_rows} -> {new_rows}")
+    grown = model.hero_embed.weight.detach().cpu().clone()   # fresh init for new rows
+    grown[:old_rows] = old                                   # preserve learned rows
+    sd[key] = grown
+    return new_rows - old_rows
+
+
 def run_finetune(incumbent_dir: Path, out_ver: str, train_cutoff: str,
                  eval_dates: list[str], epochs: int, n_train_rows: int,
                  lr: float = 2e-4, warmup_steps: int = 500, warm_start: bool = True) -> Path:
@@ -114,14 +136,22 @@ def run_finetune(incumbent_dir: Path, out_ver: str, train_cutoff: str,
 
         mhp = base_cfg["transformer_model"]
         item_vocab_size = int(meta.get("item_vocab_size", 0)) or 1
-        model = build_model(mhp, vocab_size=int(base_cfg["hero"]["vocab_size"]),
+        # Hero vocab from the central config (config/training.yaml) so a bumped vocab
+        # — e.g. to admit a new patch hero — takes effect on retrain; fall back to the
+        # incumbent's value. The warm-start then resizes the hero embedding (ADR 0007).
+        hero_vocab = int((config.training_config().get("hero") or {})
+                         .get("vocab_size", base_cfg["hero"]["vocab_size"]))
+        model = build_model(mhp, vocab_size=hero_vocab,
                             n_player_feats=n_pf, item_vocab_size=item_vocab_size,
                             patch_vocab_size=int(base_cfg.get("patch", {}).get("vocab_size", 8))).to(device)
         if warm_start:
             sd = torch.load(incumbent_dir / "model.pt", map_location="cpu", weights_only=True)
+            n_added = _grow_hero_embed(sd, model)   # resize hero rows if vocab grew
             missing, unexpected = model.load_state_dict(sd, strict=False)
             assert not unexpected and set(missing) <= {"patch_embed.weight"}, (missing, unexpected)
-            print(f"[finetune] warm-started from {incumbent_dir.name} ({count_params(model)['total']:,} params)")
+            grew = f", grew hero vocab +{n_added} rows" if n_added else ""
+            print(f"[finetune] warm-started from {incumbent_dir.name} "
+                  f"({count_params(model)['total']:,} params{grew})")
         else:
             print(f"[finetune] FROM SCRATCH (random init, {count_params(model)['total']:,} params)")
 
@@ -158,7 +188,15 @@ def run_finetune(incumbent_dir: Path, out_ver: str, train_cutoff: str,
         out_dir = registry.new_version_dir(out_ver)
         torch.save(model.state_dict(), out_dir / "model.pt")
         if out_dir.resolve() != incumbent_dir.resolve():   # not an in-place refit
-            shutil.copy2(incumbent_dir / "config.yaml", out_dir / "config.yaml")
+            # Candidate config = incumbent config with the hero block synced to the
+            # vocab this model was actually built with (ADR 0007), so serving — which
+            # reads the hero vocab from the candidate's own config — loads it cleanly.
+            import yaml as _yaml
+            cand_cfg = dict(base_cfg)
+            cand_cfg["hero"] = {**(base_cfg.get("hero") or {}),
+                                **(config.training_config().get("hero") or {}),
+                                "vocab_size": hero_vocab}
+            (out_dir / "config.yaml").write_text(_yaml.safe_dump(cand_cfg, sort_keys=False))
             shutil.copy2(incumbent_dir / "item_vocab.json", out_dir / "item_vocab.json")
             registry.copy_artifacts_from(incumbent_dir.name, out_ver)
         import json

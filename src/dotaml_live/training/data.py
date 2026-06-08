@@ -51,6 +51,8 @@ import pyarrow.parquet as pq
 import torch
 from torch.utils.data import Dataset
 
+from ..common import config as _config
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 FEAT_BOUNDS = {
@@ -134,9 +136,11 @@ def load_arrays(table, feat_names: list[str]) -> tuple[np.ndarray, np.ndarray,
     r_cols = [table.column(f"r{i}").to_numpy(zero_copy_only=False).astype(np.int64) for i in range(5)]
     d_cols = [table.column(f"d{i}").to_numpy(zero_copy_only=False).astype(np.int64) for i in range(5)]
     hero_ids = np.stack(r_cols + d_cols, axis=1)
-    if hero_ids.min() < 1 or hero_ids.max() > 150:
+    _h = _config.hero_config()   # range from config/training.yaml `hero:` (ADR 0007)
+    if hero_ids.min() < _h["id_min"] or hero_ids.max() > _h["id_max"]:
         raise ValueError(
-            f"hero_ids out of expected [1, 150] range: [{hero_ids.min()}, {hero_ids.max()}]"
+            f"hero_ids out of expected [{_h['id_min']}, {_h['id_max']}] range: "
+            f"[{hero_ids.min()}, {hero_ids.max()}]"
         )
     y = table.column("radiant_win").to_numpy(zero_copy_only=False).astype(np.float32)
     n = table.num_rows

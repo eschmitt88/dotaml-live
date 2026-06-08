@@ -1,6 +1,18 @@
 # Continuous-training config (layers on top of the vendored model config.yaml).
 base_config: "registry/v7-base/config.yaml"
 
+# Hero-id range + embedding vocab — THE single source of truth (was hardcoded
+# [1,150] in build_features/build_runner/data.py and pinned at 151 in the model
+# build). Grown for patch-7.40's hero Largo (id 155); vocab_size = id_max + 1
+# (id 0 = PAD), with headroom for a few future heroes. Bumping id_max here +
+# rebuilding the rolling store + a warm-start retrain is how a new hero enters the
+# model (the finetune resizes the hero embedding, preserving learned rows). See
+# ADR 0007.
+hero:
+  id_min: 1
+  id_max: 160
+  vocab_size: 161
+
 finetune:
   resume_from: live          # warm-start from the current live checkpoint
   epochs: 3                  # short nightly fine-tune (full from-scratch is ~25 ep / 5.7h)

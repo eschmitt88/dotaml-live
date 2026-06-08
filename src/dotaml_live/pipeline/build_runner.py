@@ -24,6 +24,7 @@ from ..common import config
 from ..features.aggregator import DurableAggregator, is_prepatch_date
 from ..features.build_features_extended import (
     enumerate_raw_files, is_forfeit, too_many_empty_inv,
+    HERO_ID_MIN, HERO_ID_MAX,
 )
 from ..features.build_rich_cols_extended import parse_items
 from . import rolling_store as rs
@@ -103,7 +104,7 @@ def _emit_match(agg: DurableAggregator, m: dict, start_ts: int, date: str,
     players = m["players"]
     accts = [int(p.get("account_id") or 0) for p in players]
     heroes = [int(p.get("hero_id") or 0) for p in players]
-    if any(h < 1 or h > 150 for h in heroes):
+    if any(h < HERO_ID_MIN or h > HERO_ID_MAX for h in heroes):   # range from config (ADR 0007)
         return None
     rw = 1 if m["radiant_win"] else 0
 
