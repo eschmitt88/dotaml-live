@@ -187,16 +187,17 @@ def run_finetune(incumbent_dir: Path, out_ver: str, train_cutoff: str,
 
         out_dir = registry.new_version_dir(out_ver)
         torch.save(model.state_dict(), out_dir / "model.pt")
-        if out_dir.resolve() != incumbent_dir.resolve():   # not an in-place refit
-            # Candidate config = incumbent config with the hero block synced to the
-            # vocab this model was actually built with (ADR 0007), so serving — which
-            # reads the hero vocab from the candidate's own config — loads it cleanly.
-            import yaml as _yaml
-            cand_cfg = dict(base_cfg)
-            cand_cfg["hero"] = {**(base_cfg.get("hero") or {}),
-                                **(config.training_config().get("hero") or {}),
-                                "vocab_size": hero_vocab}
-            (out_dir / "config.yaml").write_text(_yaml.safe_dump(cand_cfg, sort_keys=False))
+        # Always sync the output config's hero block to the vocab this model was
+        # actually built with (ADR 0007) — including the in-place refit case
+        # (out_dir == incumbent_dir) — so serving, which reads the hero vocab from
+        # the model's own config, never hits a config/model-vocab size mismatch.
+        import yaml as _yaml
+        cand_cfg = dict(base_cfg)
+        cand_cfg["hero"] = {**(base_cfg.get("hero") or {}),
+                            **(config.training_config().get("hero") or {}),
+                            "vocab_size": hero_vocab}
+        (out_dir / "config.yaml").write_text(_yaml.safe_dump(cand_cfg, sort_keys=False))
+        if out_dir.resolve() != incumbent_dir.resolve():   # new version, not in-place refit
             shutil.copy2(incumbent_dir / "item_vocab.json", out_dir / "item_vocab.json")
             registry.copy_artifacts_from(incumbent_dir.name, out_ver)
         import json

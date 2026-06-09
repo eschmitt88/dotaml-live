@@ -61,7 +61,8 @@ def _latest_day() -> str | None:
 
 
 def run_cycle(now: str | None = None, timestamp: str = "", train: bool = True,
-              update_data: bool = True, from_scratch: bool = False) -> dict:
+              update_data: bool = True, from_scratch: bool = False,
+              force_promote: bool = False) -> dict:
     cfg = config.training_config()
     # 0+1. pull new blobs from Azure (if available), then update the rolling store
     if update_data:
@@ -127,17 +128,27 @@ def run_cycle(now: str | None = None, timestamp: str = "", train: bool = True,
         inc = promote.GateInput(fresh_auc=inc_auc, probes={}, anchor_auc=None)
     result = promote.decide(cand, inc, cfg["promotion"], _halt_thresholds(cand_dir))
     print(f"[retrain] shadow gate: promote={result.promote} :: {result.reasons}")
+    do_promote = result.promote
+    if force_promote and not do_promote:
+        # Manual override: promote despite a non-passing gate. Used for changes the
+        # AUC gate is blind to — e.g. expanding hero coverage (a new patch hero is too
+        # rare to move overall AUC, but the model must still learn to represent it).
+        print(f"[retrain] FORCE-PROMOTE override: promoting {candidate_ver} despite gate "
+              f"({result.reasons})")
+        do_promote = True
 
     # 6. promote -> refit-for-serving through `now` (kill the lag) -> regen combos -> prune
-    if result.promote:
+    if do_promote:
         if config.splits_policy()["prequential"].get("refit_for_serving", True):
             _refit_for_serving(candidate_ver, now)
         registry.set_live(candidate_ver)
         _regen_combos(candidate_ver)        # discovery table is model-specific
         registry.prune(_keep_last_n())
-        print(f"[retrain] PROMOTED {candidate_ver} -> live")
+        print(f"[retrain] PROMOTED {candidate_ver} -> live"
+              f"{' (forced)' if (do_promote and not result.promote) else ''}")
     return {"status": "ok", "now": now, "candidate": candidate_ver, "incumbent": incumbent_ver,
-            "promote": result.promote, "candidate_eval_auc": round(cand.fresh_auc, 4),
+            "promote": do_promote, "gate_promote": result.promote, "forced": do_promote and not result.promote,
+            "candidate_eval_auc": round(cand.fresh_auc, 4),
             "incumbent_eval_auc": round(inc_auc, 4), "reasons": result.reasons}
 
 
@@ -254,10 +265,13 @@ def main() -> None:
     ap.add_argument("--weekly", action="store_true",
                     help="from-scratch full retrain (resets warm-start drift) instead of "
                          "the nightly warm-start fine-tune")
+    ap.add_argument("--force-promote", action="store_true",
+                    help="promote the candidate even if the AUC gate declines (manual "
+                         "override for coverage changes the gate can't see, e.g. a new hero)")
     args = ap.parse_args()
     out = run_cycle(now=args.now, timestamp=args.timestamp,
                     train=not args.no_train, update_data=not args.no_update,
-                    from_scratch=args.weekly)
+                    from_scratch=args.weekly, force_promote=args.force_promote)
     print(f"[retrain] cycle: {out}")
 
 
