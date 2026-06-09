@@ -2,6 +2,43 @@
 
 Did / Findings / Next, appended per session (mirrors the research-repo discipline).
 
+## 2026-06-09 — Largo (7.40) baked into the live model
+
+### Did
+- **Included patch-7.40 hero Largo (id 155) in the model**, end to end, in a git worktree:
+  - Hero vocab is now config-driven (`config/training.yaml` `hero: id_max 160 / vocab 161`);
+    the `[1,150]` filters in build_features / build_runner / data.py read it; `finetune`
+    resizes the hero embedding on warm-start (preserves learned rows) and writes the
+    candidate config's hero block synced to the model vocab. (ADR 0007.)
+  - **Rebuilt the rolling store** (causal replay, 277 days / 51.9M matches) with the
+    relaxed filter — Largo enters exactly at the 7.40 edge (2025-12-16). A memory watchdog
+    (kill+resume from the 5-day checkpoint) guarded the long single-process replay.
+  - Warm-start retrain → candidate **ft-2026-06-09** (vocab 161, learns Largo).
+  - **hero-pick candidates** now use the real roster within the model vocab (was hardcoded
+    `range(1,151)`), so Largo is recommendable; phantom roster-gap ids excluded.
+- **Promoted ft-2026-06-09 to live** via a new `--force-promote` override and restarted the
+  dashboard. Swapped the production rolling store to the Largo build (old store backed up to
+  `data/*.pre-largo`). Re-enabled the nightly timer.
+
+### Findings
+- The AUC gate **declined** the candidate (0.6576 vs incumbent 0.6578 — noise). Expected:
+  Largo is ~2% of matches, so a Largo-aware model can't move overall AUC. The gate is blind
+  to hero coverage, so promotion was a **deliberate override** (non-inferior AUC + the
+  incumbent literally can't represent Largo). Hence `--force-promote`.
+- Serving verified: `/model` = ft-2026-06-09, n_heroes=161; winprob + hero-picks on a
+  Largo draft return 200 with Largo in-vocab (no longer masked). The dashboard no longer
+  marks Largo "not in model".
+- `refit-for-serving` failed on an empty-window edge (forced now=2026-06-09 > lake's last
+  day 06-08); the gated checkpoint serves as-is (trained through 06-02). The next nightly
+  warm-starts from ft-2026-06-09 and refits forward, closing the ~7-day lag.
+
+### Next
+- Let the Wed nightly refit ft-2026-06-09 forward (closes the train-through lag) and confirm
+  it warm-starts cleanly across the new 161 vocab.
+- Once stable, delete `data/*.pre-largo` backups (reproducible from the datalake anyway).
+- Consider making the promotion gate coverage-aware (promote at non-inferior AUC when the
+  hero roster expands) so future new heroes don't need a manual `--force-promote`.
+
 ## 2026-06-07 — dashboard redesign + out-of-vocab hero crash
 
 ### Did

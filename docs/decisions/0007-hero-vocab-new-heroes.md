@@ -1,7 +1,7 @@
 # 0007 — Hero vocab must grow for new heroes (Largo / 7.40)
 
-- Status: accepted (serving guard shipped; training-side expansion pending a retrain)
-- Date: 2026-06-07
+- Status: accepted & implemented — Largo live in ft-2026-06-09 (2026-06-09)
+- Date: 2026-06-07 (implemented 2026-06-09)
 - Related: ADR 0006 (patch detection — same class of "meta moved, model didn't" problem,
   but for the hero embedding rather than the patch embedding).
 
@@ -43,7 +43,15 @@ grows, with a single source of truth and headroom.
   model loads without a size mismatch.
 - `/model` exposes `n_heroes`; the dashboard marks ids ≥ `n_heroes` as "not in model".
 
-**Pending — required to actually *include* Largo (a retrain):**
+**Done (2026-06-09):** all four steps below were implemented and Largo was baked into
+live model **ft-2026-06-09** (vocab 161). The rolling store was rebuilt via causal replay
+(Largo enters at the 7.40 edge), the warm-start finetune resized the embedding and learned
+Largo, and the model was promoted via `--force-promote` — the AUC gate declined it (0.6576
+vs 0.6578, noise; Largo is too rare to move overall AUC), so promotion was a deliberate,
+logged override. Serving confirmed: Largo is in-vocab, scored, and recommendable. See NOTES
+2026-06-09.
+
+**The steps (as implemented):**
 1. Bump `hero.id_max` / `hero.vocab_size` in the training config with headroom (e.g.
    `id_max: 160`, `vocab_size: 161` — covers Largo at 155 plus several future heroes; spare
    rows are unused PAD until a hero claims them).
