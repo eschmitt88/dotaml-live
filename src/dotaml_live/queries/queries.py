@@ -24,7 +24,8 @@ import torch
 
 from .lookups import (
     ANON_ACCOUNT_IDS, decompose_item, get_player_features_or_default,
-    hero_name, item_cost, item_id_to_info, item_name, sample_unknown_heroes,
+    hero_id_to_name, hero_name, item_cost, item_id_to_info, item_name,
+    sample_unknown_heroes,
 )
 from ..model.v7_inference import V7Foundation, canonical_hero_sort
 
@@ -171,10 +172,17 @@ def hero_pick_rec(f: V7Foundation,
     assert len(known_dire)    <= 4 if my_side == "dire"    else len(known_dire)    <= 5
 
     locked = set(known_radiant + known_dire)
+    # Default candidates = the real hero roster, restricted to the model's hero vocab
+    # (ADR 0007). Uses the actual hero IDs (not a 1..N range, which would include
+    # phantom IDs in the roster's gaps) so new in-vocab heroes like Largo (155) are
+    # recommendable while out-of-vocab IDs are never proposed.
+    n_vocab = int(getattr(f, "n_heroes", 151))
     if candidate_heroes is None:
-        candidate_heroes = [hid for hid in range(1, 151) if hid not in locked]
+        candidate_heroes = [hid for hid in sorted(hero_id_to_name())
+                            if 1 <= hid < n_vocab and hid not in locked]
     else:
-        candidate_heroes = [hid for hid in candidate_heroes if hid not in locked]
+        candidate_heroes = [hid for hid in candidate_heroes
+                            if 1 <= hid < n_vocab and hid not in locked]
 
     n_unknown_radiant = 5 - len(known_radiant) - (1 if my_side == "radiant" else 0)
     n_unknown_dire    = 5 - len(known_dire)    - (1 if my_side == "dire"    else 0)
