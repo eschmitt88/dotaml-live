@@ -137,6 +137,7 @@ def new_item(source: str, text: str | None = None, audio: bytes | None = None) -
         "impl": None,                      # {started, finished, commits, summary, cost_usd}
         "dev": None,                       # {port, unit, url_path}
         "merge_commit": None,
+        "comments": [],                    # [{at, source, text, audio}]
         "runner_pid": None,
         "history": [{"status": "captured", "at": _now_iso()}],
     }
@@ -161,10 +162,37 @@ def audio_path(fid: str) -> Path:
     return FEEDBACK_DIR / meta["audio"]
 
 
+def add_comment(fid: str, text: str | None = None, audio: bytes | None = None) -> dict:
+    """Append a targeted comment (typed or voice memo) to one feedback item."""
+    meta = load(fid)
+    comments = meta.setdefault("comments", [])
+    audio_name = None
+    if audio is not None:
+        audio_name = f"{fid}.c{len(comments)}.{_audio_ext(audio)}"
+        (FEEDBACK_DIR / audio_name).write_bytes(audio)
+    comments.append({
+        "at": _now_iso(),
+        "source": "voice" if audio is not None else "text",
+        "text": text,
+        "audio": audio_name,
+    })
+    return save(meta)
+
+
+def comment_audio_path(fid: str, idx: int) -> Path:
+    comments = load(fid).get("comments") or []
+    if not (0 <= idx < len(comments)) or not comments[idx].get("audio"):
+        raise KeyError(fid)
+    return FEEDBACK_DIR / comments[idx]["audio"]
+
+
 def delete_item(fid: str) -> None:
     meta = load(fid)
     if meta.get("audio"):
         (FEEDBACK_DIR / meta["audio"]).unlink(missing_ok=True)
+    for c in meta.get("comments") or []:
+        if c.get("audio"):
+            (FEEDBACK_DIR / c["audio"]).unlink(missing_ok=True)
     log_path(fid).unlink(missing_ok=True)
     _meta_path(fid).unlink(missing_ok=True)
 

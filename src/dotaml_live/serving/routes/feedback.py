@@ -69,6 +69,33 @@ def feedback_audio_file(fid: str):
     return FileResponse(p)
 
 
+@router.post("/{fid}/comment")
+async def feedback_comment(fid: str, request: Request):
+    """Targeted comment on one ticket — JSON {text} or raw voice-memo bytes."""
+    meta = _get(fid)
+    if meta["status"] in ("done", "rejected", "discarded"):
+        raise HTTPException(409, f"cannot comment on an item in status {meta['status']}")
+    if (request.headers.get("content-type") or "").startswith("application/json"):
+        body = await request.json()
+        text = (body.get("text") or "").strip()
+        if not text:
+            raise HTTPException(400, "empty comment text")
+        return store.add_comment(fid, text=text)
+    data = await request.body()
+    if len(data) < 1000:
+        raise HTTPException(400, "audio too short — hold the mic a bit longer")
+    return store.add_comment(fid, audio=data)
+
+
+@router.get("/{fid}/comment/{idx}/audio")
+def feedback_comment_audio(fid: str, idx: int):
+    try:
+        p = store.comment_audio_path(fid, idx)
+    except (KeyError, ValueError):
+        raise HTTPException(404, f"no audio for comment {idx} on {fid}")
+    return FileResponse(p)
+
+
 @router.post("/{fid}/approve")
 def feedback_approve(fid: str):
     meta = _get(fid)

@@ -59,6 +59,26 @@ def test_reconcile_marks_dead_runner_failed():
     assert "runner died" in out["error"]
 
 
+def test_comments_text_and_voice():
+    meta = store.new_item("text", text="needs a comment")
+    fid = meta["id"]
+    assert meta["comments"] == []
+
+    store.add_comment(fid, text="the button is still too small")
+    webm = b"\x1aE\xdf\xa3" + b"\x00" * 64
+    meta = store.add_comment(fid, audio=webm)
+
+    assert [c["source"] for c in meta["comments"]] == ["text", "voice"]
+    assert meta["comments"][0]["text"] == "the button is still too small"
+    assert store.comment_audio_path(fid, 1).read_bytes() == webm
+    with pytest.raises(KeyError):
+        store.comment_audio_path(fid, 0)   # text comment has no audio
+
+    audio_file = store.comment_audio_path(fid, 1)
+    store.delete_item(fid)
+    assert not audio_file.exists()
+
+
 def test_status_validation():
     meta = store.new_item("text", text="y")
     with pytest.raises(AssertionError):

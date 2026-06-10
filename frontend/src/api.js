@@ -45,6 +45,8 @@ export const api = {
   feedbackText: (text) => post('/api/feedback/text', { text }),
   feedbackAudio: (blob) => postBlob('/api/feedback/audio', blob),
   feedbackAction: (id, action, body = {}) => post(`/api/feedback/${id}/${action}`, body),
+  feedbackComment: (id, text) => post(`/api/feedback/${id}/comment`, { text }),
+  feedbackCommentAudio: (id, blob) => postBlob(`/api/feedback/${id}/comment`, blob),
   feedbackLog: async (id) => {
     const r = await fetch(`/api/feedback/${id}/log`)
     if (!r.ok) throw new Error(`log -> ${r.status}`)
