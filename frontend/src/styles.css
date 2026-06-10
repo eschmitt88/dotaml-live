@@ -58,8 +58,8 @@ input, select { background:#0c1116; color:var(--fg); border:1px solid var(--line
 .team-head { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
 .team-name { text-transform:uppercase; letter-spacing:.05em; font-size:12px; font-weight:700; color:var(--side); }
 .you { background:var(--side); color:#fff; font-size:10px; padding:1px 6px; border-radius:4px; }
-.slot { display:flex; align-items:center; gap:6px; margin:5px 0; }
-.slot.focus { background:#1b2632; border-radius:8px; padding:3px 4px; margin:2px -4px; box-shadow:0 0 0 1px var(--blue); }
+.slot { display:flex; align-items:center; gap:6px; padding:3px 4px; margin:2px -4px; }
+.slot.focus { background:#1b2632; border-radius:8px; box-shadow:0 0 0 1px var(--blue); }
 .rec-dot { background:none; border:0; color:var(--mut); font-size:14px; padding:2px 4px; width:24px; }
 .slot.focus .rec-dot { color:var(--blue); }
 .fav-star { background:none; border:0; color:#c79b2e; font-size:15px; padding:0 2px; width:20px; }
