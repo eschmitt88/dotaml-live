@@ -216,7 +216,7 @@ button.more { margin-top:12px; }
 /* ===== feedback queue tab ===== */
 .fb-tab { max-width: 880px; }
 .fb-badge { background:var(--red); color:#fff; font-size:10px; font-weight:700; border-radius:9px; padding:1px 6px; margin-left:6px; vertical-align:1px; }
-.rec-dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--red); margin-left:6px; vertical-align:1px; animation:rec-pulse 1.2s ease-in-out infinite; }
+.rec-live-dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--red); margin-left:6px; vertical-align:1px; animation:rec-pulse 1.2s ease-in-out infinite; }
 @keyframes rec-pulse { 50% { opacity:.35; box-shadow:0 0 0 4px rgba(220,38,38,.2); } }
 .fb-composer { display:flex; flex-direction:column; gap:8px; margin-bottom:18px; }
 .fb-composer textarea { background:#0c1116; color:var(--fg); border:1px solid var(--line); border-radius:8px; padding:10px 12px; font:inherit; resize:vertical; }
