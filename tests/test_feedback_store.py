@@ -83,3 +83,34 @@ def test_status_validation():
     meta = store.new_item("text", text="y")
     with pytest.raises(AssertionError):
         store.set_status(meta["id"], "nonsense")
+
+
+def test_comments_section_in_implement_prompt():
+    from dotaml_live.serving import feedback_runner as runner
+
+    # no comments → empty section, prompt unchanged
+    assert runner._comments_section({"comments": []}) == ""
+    assert runner._comments_section({}) == ""
+    # untranscribed voice comment (no text yet) contributes nothing
+    assert runner._comments_section(
+        {"comments": [{"at": "t", "source": "voice", "text": None, "audio": "a.webm"}]}) == ""
+
+    section = runner._comments_section(
+        {"comments": [{"at": "2026-06-10T20:00:00Z", "source": "text",
+                       "text": "make the bar red instead"}]})
+    assert "## Follow-up Comments" in section
+    assert "make the bar red instead" in section
+
+    meta = {"comments": [{"at": "t", "source": "text", "text": "extra note"}]}
+    prompt = runner.IMPLEMENT_PROMPT.format(
+        branch="b", fid="f", title="t", summary="s", details="d", area="backend",
+        acceptance="- a", raw="raw fb", comments_section=runner._comments_section(meta),
+        repo="/r", wt="/w", python="py")
+    assert "## Follow-up Comments" in prompt
+    assert "extra note" in prompt
+    # without comments the rendered prompt is byte-identical to the old one
+    bare = runner.IMPLEMENT_PROMPT.format(
+        branch="b", fid="f", title="t", summary="s", details="d", area="backend",
+        acceptance="- a", raw="raw fb", comments_section="",
+        repo="/r", wt="/w", python="py")
+    assert "Follow-up" not in bare

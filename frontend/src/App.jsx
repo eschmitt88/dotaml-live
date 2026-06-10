@@ -833,6 +833,9 @@ function FeedbackItem({ item, onChanged, onErr }) {
         {devUrl && <>
           <a className="fb-preview" href={devUrl} target="_blank" rel="noreferrer">⧉ Open dev preview :{item.dev.port}</a>
           <button disabled={acting} onClick={() => act('accept')}>✓ Accept & deploy</button>
+          {item.comments?.length > 0 &&
+            <button className="ghost" disabled={acting} onClick={() => act('retry')}>
+              ↻ Re-implement with comments</button>}
           <button className="ghost danger" disabled={acting} onClick={() => act('discard')}>Discard</button>
         </>}
         {item.status === 'failed' && <>
