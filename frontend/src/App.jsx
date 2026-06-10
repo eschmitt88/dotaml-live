@@ -967,7 +967,7 @@ export default function App() {
           <button className={tab === 'discover' ? 'on' : ''} onClick={() => setTab('discover')}>Combo discovery</button>
           <button className={tab === 'shots' ? 'on' : ''} onClick={() => setTab('shots')}>Screenshots</button>
           <button className={tab === 'feedback' ? 'on' : ''} onClick={() => setTab('feedback')}>
-            Feedback{rec && <span className="rec-dot" title="recording in progress" />}
+            Feedback{rec && <span className="rec-live-dot" title="recording in progress" />}
             {fbCount > 0 && <span className="fb-badge">{fbCount}</span>}
           </button>
         </nav>
