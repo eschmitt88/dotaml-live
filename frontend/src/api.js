@@ -27,6 +27,7 @@ async function del(path) {
 }
 
 export const api = {
+  health: () => get('/health'),
   meta: () => get('/meta'),
   draftFromScreenshot: (blob) => postBlob('/api/draft-from-screenshot', blob),
   screenshots: (status = 'all') => get(`/api/screenshots?status=${status}`),
