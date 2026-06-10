@@ -40,4 +40,14 @@ export const api = {
   heroCombos: (b) => post('/api/hero-combos', b),
   combosTable: () => get('/api/combos-table'),
   patchStatus: () => get('/api/patch-status'),
+  feedback: () => get('/api/feedback'),
+  feedbackText: (text) => post('/api/feedback/text', { text }),
+  feedbackAudio: (blob) => postBlob('/api/feedback/audio', blob),
+  feedbackAction: (id, action, body = {}) => post(`/api/feedback/${id}/${action}`, body),
+  feedbackLog: async (id) => {
+    const r = await fetch(`/api/feedback/${id}/log`)
+    if (!r.ok) throw new Error(`log -> ${r.status}`)
+    return r.text()
+  },
+  deleteFeedback: (id) => del(`/api/feedback/${id}`),
 }

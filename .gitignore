@@ -18,6 +18,10 @@ __pycache__/
 /frontend/node_modules/
 /frontend/dist/
 
+# Feedback-queue implementation worktrees (managed by feedback_runner)
+/.worktrees/
+.feedback-summary.md
+
 # Local env
 .env
 *.log

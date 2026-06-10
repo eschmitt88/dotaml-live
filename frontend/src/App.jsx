@@ -635,6 +635,236 @@ function ShotsTab({ heroById, onReview }) {
   )
 }
 
+// ---------------- Feedback queue tab ----------------
+
+const FB_CHIP = {
+  captured: ['queued', 'wait'], transcribing: ['transcribing…', 'wait'],
+  triaging: ['writing ticket…', 'wait'], triaged: ['awaiting approval', 'todo'],
+  implementing: ['implementing…', 'wait'], implemented: ['ready to test', 'ok'],
+  accepting: ['deploying…', 'wait'], done: ['done', 'done'],
+  failed: ['failed', 'bad'], rejected: ['rejected', 'off'], discarded: ['discarded', 'off'],
+}
+const FB_BUSY = ['captured', 'transcribing', 'triaging', 'implementing', 'accepting']
+
+function FeedbackComposer({ onSubmitted }) {
+  const [text, setText] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [rec, setRec] = useState(false)
+  const [secs, setSecs] = useState(0)
+  const [err, setErr] = useState(null)
+  const recRef = useRef(null)
+  const canRecord = !!navigator.mediaDevices?.getUserMedia
+
+  useEffect(() => {
+    if (!rec) return
+    const t = setInterval(() => setSecs((s) => s + 1), 1000)
+    return () => clearInterval(t)
+  }, [rec])
+
+  const submitText = async () => {
+    if (!text.trim()) return
+    setBusy(true); setErr(null)
+    try { await api.feedbackText(text.trim()); setText(''); onSubmitted() }
+    catch (e) { setErr(String(e)) }
+    setBusy(false)
+  }
+
+  const toggleRec = async () => {
+    if (rec) { recRef.current?.stop(); return }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : ''
+      const mr = new MediaRecorder(stream, mime ? { mimeType: mime } : {})
+      const chunks = []
+      mr.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data) }
+      mr.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop())
+        setRec(false); setSecs(0)
+        setBusy(true)
+        try { await api.feedbackAudio(new Blob(chunks, { type: mr.mimeType || 'audio/webm' })); onSubmitted() }
+        catch (e) { setErr(String(e)) }
+        setBusy(false)
+      }
+      recRef.current = mr
+      mr.start()
+      setRec(true); setSecs(0); setErr(null)
+    } catch (e) { setErr(`mic unavailable: ${e.message}`) }
+  }
+
+  return (
+    <div className="fb-composer card">
+      <textarea value={text} placeholder="Describe an improvement — or hit the mic and just talk…"
+        rows={2} onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submitText() }} />
+      <div className="fb-compose-row">
+        {canRecord ? (
+          <button className={`fb-mic ${rec ? 'rec' : ''}`} onClick={toggleRec} disabled={busy}>
+            {rec ? `■ stop (${secs}s)` : '🎤 record'}
+          </button>
+        ) : (
+          <span className="muted" title="getUserMedia needs HTTPS or localhost — open via localhost, or enable chrome://flags/#unsafely-treat-insecure-origin-as-secure for this origin">
+            🎤 voice needs HTTPS / localhost
+          </span>
+        )}
+        <span className="fb-spacer" />
+        {err && <span className="err inline">{err}</span>}
+        <button onClick={submitText} disabled={busy || !text.trim()}>
+          {busy ? 'sending…' : 'Submit'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function FbLog({ id, live }) {
+  const [log, setLog] = useState('')
+  const boxRef = useRef(null)
+  useEffect(() => {
+    let on = true
+    const pull = () => api.feedbackLog(id).then((t) => { if (on) setLog(t) }).catch(() => {})
+    pull()
+    const t = live ? setInterval(pull, 3000) : null
+    return () => { on = false; if (t) clearInterval(t) }
+  }, [id, live])
+  useEffect(() => { if (boxRef.current) boxRef.current.scrollTop = boxRef.current.scrollHeight }, [log])
+  return <pre className="fb-log" ref={boxRef}>{log || '(no log yet)'}</pre>
+}
+
+function FeedbackItem({ item, onChanged, onErr }) {
+  const [open, setOpen] = useState(false)
+  const [showLog, setShowLog] = useState(false)
+  const [acting, setActing] = useState(false)
+  const [label, kind] = FB_CHIP[item.status] || [item.status, 'off']
+  const t = item.ticket
+  const busy = FB_BUSY.includes(item.status)
+  const devUrl = item.status === 'implemented' && item.dev
+    ? `http://${window.location.hostname}:${item.dev.port}/` : null
+
+  const act = async (action, fn) => {
+    setActing(true)
+    try { await (fn ? fn() : api.feedbackAction(item.id, action)); onChanged() }
+    catch (e) { onErr(String(e)) }
+    setActing(false)
+  }
+
+  return (
+    <div className={`fb-item ${item.status}`}>
+      <div className="fb-row" onClick={() => setOpen((o) => !o)}>
+        <span className={`fb-chip ${kind}`}>{busy && <i className="fb-spin" />}{label}</span>
+        <span className="fb-title">{t?.title || (item.raw_text
+          ? item.raw_text.slice(0, 90) + (item.raw_text.length > 90 ? '…' : '')
+          : (item.source === 'voice' ? '🎤 voice memo (transcribing…)' : '…'))}</span>
+        <span className="fb-when">{item.created.slice(5, 16).replace('T', ' ')}</span>
+        <span className="fb-arrow">{open ? '▾' : '▸'}</span>
+      </div>
+
+      {item.error && <p className="err fb-err">{item.error}</p>}
+
+      <div className="fb-actions" onClick={(e) => e.stopPropagation()}>
+        {item.status === 'triaged' && <>
+          <button disabled={acting} onClick={() => act('approve')}>✓ Approve — implement it</button>
+          <button className="ghost" disabled={acting} onClick={() => act('reject')}>Reject</button>
+        </>}
+        {devUrl && <>
+          <a className="fb-preview" href={devUrl} target="_blank" rel="noreferrer">⧉ Open dev preview :{item.dev.port}</a>
+          <button disabled={acting} onClick={() => act('accept')}>✓ Accept & deploy</button>
+          <button className="ghost danger" disabled={acting} onClick={() => act('discard')}>Discard</button>
+        </>}
+        {item.status === 'failed' && <>
+          <button disabled={acting} onClick={() => act('retry')}>↻ Retry</button>
+          <button className="ghost" disabled={acting} onClick={() => act('reject')}>Reject</button>
+        </>}
+        {['done', 'rejected', 'discarded'].includes(item.status) &&
+          <button className="ghost danger" disabled={acting}
+            onClick={() => act(null, () => api.deleteFeedback(item.id))}>✕ remove</button>}
+        {(item.status === 'implementing' || item.status === 'accepting' || item.impl) &&
+          <button className="ghost" onClick={() => setShowLog((s) => !s)}>
+            {showLog ? 'hide log' : 'show log'}</button>}
+      </div>
+
+      {showLog && <FbLog id={item.id} live={busy} />}
+
+      {open && (
+        <div className="fb-detail">
+          {t && <>
+            <p className="fb-sum">{t.summary}</p>
+            {t.details && <p className="fb-det">{t.details}</p>}
+            {t.acceptance?.length > 0 && (
+              <ul className="fb-acc">{t.acceptance.map((a, i) => <li key={i}>{a}</li>)}</ul>
+            )}
+          </>}
+          {item.impl?.summary && (
+            <div className="fb-implsum"><b>Implementation notes</b><pre>{item.impl.summary}</pre></div>
+          )}
+          {item.raw_text && <p className="fb-raw">“{item.raw_text}”
+            {item.source === 'voice' && <audio controls preload="none" src={`/api/feedback/${item.id}/audio`} />}</p>}
+          <p className="fb-meta">
+            {item.branch && <>branch <code>{item.branch}</code> · </>}
+            {item.merge_commit && <>merged <code>{item.merge_commit.slice(0, 8)}</code> · </>}
+            {item.impl?.cost_usd != null && <>impl cost ${item.impl.cost_usd.toFixed(2)} · </>}
+            id <code>{item.id}</code>
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function FeedbackTab() {
+  const [items, setItems] = useState(null)
+  const [err, setErr] = useState(null)
+  const [showArchive, setShowArchive] = useState(false)
+
+  const load = () => api.feedback().then((r) => { setItems(r.items); setErr(null) })
+    .catch((e) => setErr(String(e)))
+  useEffect(() => {
+    load()
+    const t = setInterval(load, 4000)
+    return () => clearInterval(t)
+  }, [])
+
+  if (err && !items) return <p className="err">{err}</p>
+  if (!items) return <p>Loading feedback queue…</p>
+
+  const by = (...sts) => items.filter((i) => sts.includes(i.status))
+  const groups = [
+    ['Needs your attention', [...by('implemented'), ...by('failed')], 'act'],
+    ['Awaiting approval', by('triaged'), 'act'],
+    ['Working', by(...FB_BUSY), ''],
+    ['Completed', by('done'), ''],
+  ]
+  const archive = by('rejected', 'discarded')
+
+  return (
+    <section className="fb-tab">
+      <div className="disco-head">
+        <div>
+          <h2>Feedback → improvements</h2>
+          <p className="sub">Talk or type an improvement. Claude turns it into a ticket; approving it
+            spins up an implementation on a branch with a dev preview to test, and accepting deploys it here.</p>
+        </div>
+      </div>
+      <FeedbackComposer onSubmitted={load} />
+      {err && <p className="err">{err}</p>}
+      {items.length === 0 && <p className="muted">Queue is empty — say what you wish this app did better.</p>}
+      {groups.map(([name, list, cls]) => list.length > 0 && (
+        <div key={name} className={`fb-group ${cls}`}>
+          <h4>{name} <small>{list.length}</small></h4>
+          {list.map((i) => <FeedbackItem key={i.id} item={i} onChanged={load} onErr={setErr} />)}
+        </div>
+      ))}
+      {archive.length > 0 && (
+        <div className="fb-group off">
+          <h4 className="fb-archtoggle" onClick={() => setShowArchive((s) => !s)}>
+            {showArchive ? '▾' : '▸'} Archive <small>{archive.length}</small></h4>
+          {showArchive && archive.map((i) =>
+            <FeedbackItem key={i.id} item={i} onChanged={load} onErr={setErr} />)}
+        </div>
+      )}
+    </section>
+  )
+}
+
 // ---------------- App shell ----------------
 
 export default function App() {
@@ -645,6 +875,16 @@ export default function App() {
   const [patch, setPatch] = useState(null)
   const [draft, setDraft] = useState(SAMPLE)
   const [pendingShot, setPendingShot] = useState(null)
+  const [fbCount, setFbCount] = useState(0)
+
+  useEffect(() => {
+    const pull = () => api.feedback().then((r) =>
+      setFbCount(r.items.filter((i) => ['triaged', 'implemented', 'failed'].includes(i.status)).length))
+      .catch(() => {})
+    pull()
+    const t = setInterval(pull, 30000)
+    return () => clearInterval(t)
+  }, [])
 
   const reviewShot = (s) => {
     // load the shot's detections (or its label, if revisiting) onto the board
@@ -686,6 +926,9 @@ export default function App() {
           <button className={tab === 'draft' ? 'on' : ''} onClick={() => setTab('draft')}>Draft analysis</button>
           <button className={tab === 'discover' ? 'on' : ''} onClick={() => setTab('discover')}>Combo discovery</button>
           <button className={tab === 'shots' ? 'on' : ''} onClick={() => setTab('shots')}>Screenshots</button>
+          <button className={tab === 'feedback' ? 'on' : ''} onClick={() => setTab('feedback')}>
+            Feedback{fbCount > 0 && <span className="fb-badge">{fbCount}</span>}
+          </button>
         </nav>
         <span className="model">model: {model?.version ?? '?'} · {model?.device ?? '?'}</span>
       </header>
@@ -694,8 +937,10 @@ export default function App() {
             pendingShot={pendingShot} setPendingShot={setPendingShot} />
         : tab === 'discover'
           ? <DiscoverTab onAdd={addCombo} />
-          : <ShotsTab onReview={reviewShot}
-              heroById={Object.fromEntries(meta.heroes.map((h) => [h.id, h]))} />}
+          : tab === 'feedback'
+            ? <FeedbackTab />
+            : <ShotsTab onReview={reviewShot}
+                heroById={Object.fromEntries(meta.heroes.map((h) => [h.id, h]))} />}
     </div>
   )
 }

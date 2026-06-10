@@ -4,6 +4,18 @@ port: 8090
 reload_poll_seconds: 30   # how often model_loader checks the registry 'live' pointer
 device: "auto"            # auto -> cuda if available else cpu
 
+# Feedback queue: voice/text → claude triage → approved ticket → claude
+# implements in a worktree → dev preview server → accept merges to master.
+feedback:
+  whisper_model: "large-v3-turbo"   # faster-whisper model for voice memos
+  whisper_device: "cpu"             # ctranslate2 needs cuBLAS 12; venv torch is cu13.
+                                    # cpu int8 does a 60s memo in seconds — fine here.
+                                    # set "auto" to try cuda first.
+  triage_model: "sonnet"            # claude -p model that writes tickets
+  implement_model: null             # null -> claude CLI default model
+  implement_timeout_minutes: 60
+  dev_ports: [8091, 8099]           # preview servers for implemented tickets
+
 # Default query knobs (overridable per request)
 defaults:
   hero_picks_top_k: 10

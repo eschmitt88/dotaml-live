@@ -15,6 +15,7 @@ from ..common import config, paths
 from ..queries.lookups import (hero_id_to_name, hero_id_to_attr, hero_id_to_roles,
                                item_id_to_info)
 from .model_loader import ModelHolder
+from .routes import feedback as feedback_routes
 from .routes import queries as queries_routes
 
 
@@ -38,6 +39,7 @@ def create_app() -> FastAPI:
 
     app.state.model = ModelHolder(device_cfg=cfg.get("device", "auto"))
     app.include_router(queries_routes.router)
+    app.include_router(feedback_routes.router)
 
     @app.get("/health")
     def health():

@@ -2,6 +2,41 @@
 
 Did / Findings / Next, appended per session (mirrors the research-repo discipline).
 
+## 2026-06-10 — self-improving feedback queue (voice → ticket → claude → dev preview)
+
+### Did
+- **Built the feedback queue** (ADR 0008): a 4th dashboard tab where feedback is
+  spoken (MediaRecorder → faster-whisper) or typed, claude triages it into a
+  concise ticket (`claude -p`, read-only tools), one click approves it, a second
+  claude run implements it in a git worktree under `.worktrees/`, a **dev preview
+  server** (ports 8091-8099, `PYTHONPATH=<worktree>/src` override) serves the
+  branch for human testing, and Accept merges → rebuilds the SPA → restarts the
+  live service. Completed/rejected items stay visible in the tab.
+- New: `serving/feedback_store.py` (sidecar store, status machine),
+  `serving/transcribe.py` (faster-whisper large-v3-turbo, CPU int8),
+  `serving/feedback_runner.py` (detached stages as transient systemd units),
+  `serving/routes/feedback.py` (+9 endpoints), FeedbackTab in the SPA.
+- Researched ASR: Parakeet-TDT-v3 is the accuracy leader (~6% WER) but needs the
+  NeMo stack; chose faster-whisper (MIT, pip-only, decodes browser webm/opus
+  natively, robustness champion). Weights in `data/feedback/whisper/`.
+
+### Findings
+- **Full loop verified live**: a real ticket ("Add live API status dot to header")
+  went captured → triaged (claude grounded it in real file paths) → implemented
+  (1 commit, $1.11, 2 min) → dev preview on :8091 serving the new bundle while
+  :8090 stayed unchanged. Left in "ready to test" for the accept-flow demo.
+- `systemd-run --user` transient units are the right detachment primitive: the
+  accept stage restarts the dashboard service without killing itself (own cgroup).
+- ctranslate2 wants cuBLAS 12 but the venv torch is cu13 → whisper runs CPU int8
+  (seconds per memo; `feedback.whisper_device: auto` re-enables the cuda attempt).
+- getUserMedia needs a secure context: voice capture works on localhost; LAN IPs
+  need the chrome insecure-origin flag or HTTPS (UI degrades gracefully).
+
+### Next
+- Accept or discard the status-dot ticket from the Feedback tab (tests accept path).
+- Consider auto-pushing merged feedback commits (currently land on local master).
+- If transcription quality ever disappoints: Parakeet-TDT upgrade path in ADR 0008.
+
 ## 2026-06-09 — Largo (7.40) baked into the live model
 
 ### Did

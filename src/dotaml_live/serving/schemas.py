@@ -38,6 +38,15 @@ class ShotLabelReq(BaseModel):
     labeled_by: str = "human"      # "human" | "claude"
 
 
+class FeedbackTextReq(BaseModel):
+    """Typed feedback for the improvement queue."""
+    text: str = Field(..., max_length=8000)
+
+
+class FeedbackRejectReq(BaseModel):
+    reason: str | None = None
+
+
 class HeroCombosReq(BaseModel):
     pool: list[int] | None = None
     size: int = Field(2, ge=2, le=3)
