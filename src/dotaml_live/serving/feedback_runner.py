@@ -82,8 +82,10 @@ def spawn_stage(stage: str, fid: str) -> None:
 
 def stop_dev_server(meta: dict) -> None:
     dev = meta.get("dev") or {}
-    if dev.get("unit"):
-        subprocess.run(["systemctl", "--user", "stop", dev["unit"]],
+    # also stop the deterministic unit name, in case a crash left dev unset
+    units = {dev.get("unit"), f"dotaml-feedback-dev-{meta['id']}" if meta.get("id") else None}
+    for unit in filter(None, units):
+        subprocess.run(["systemctl", "--user", "stop", unit],
                        capture_output=True, timeout=30)
     if dev.get("pid"):
         try:
@@ -162,7 +164,7 @@ acceptance criteria:
 
 ORIGINAL USER FEEDBACK (verbatim, may be a rough voice transcript):
 \"\"\"{raw}\"\"\"
-
+{comments_section}
 REPO ORIENTATION
 - FastAPI backend: src/dotaml_live/serving/ (app.py, routes/, schemas.py); domain
   logic in src/dotaml_live/queries|model|features|pipeline.
@@ -183,6 +185,27 @@ RULES
   2-6 markdown bullets — what changed and exactly how to test it in the
   dashboard UI at the dev preview.
 """
+
+
+COMMENTS_SECTION = """
+## Follow-up Comments
+The user posted these comments on the ticket after reviewing it (possibly after
+a previous implementation pass). They refine or correct the ticket above —
+incorporate them into this pass:
+{comments}
+"""
+
+
+def _comments_section(meta: dict) -> str:
+    lines = []
+    for c in meta.get("comments") or []:
+        text = (c.get("text") or "").strip()
+        if not text:
+            continue
+        lines.append(f"- [{c.get('at', '?')}, {c.get('source', 'text')}] {text}")
+    if not lines:
+        return ""
+    return COMMENTS_SECTION.format(comments="\n".join(lines))
 
 
 def _fmt_stream_line(line: str) -> list[str]:
@@ -213,7 +236,8 @@ def _claude_implement(meta: dict, wt: Path, log_file: Path) -> dict:
         branch=meta["branch"], fid=meta["id"], title=t["title"], summary=t["summary"],
         details=t["details"], area=t["area"],
         acceptance="\n".join(f"- {a}" for a in t["acceptance"]) or "- (none given)",
-        raw=meta.get("raw_text") or "", repo=REPO, wt=wt, python=sys.executable)
+        raw=meta.get("raw_text") or "", comments_section=_comments_section(meta),
+        repo=REPO, wt=wt, python=sys.executable)
     cmd = [_claude_bin(), "-p", prompt, "--dangerously-skip-permissions",
            "--output-format", "stream-json", "--verbose"]
     if fb.get("implement_model"):
@@ -275,9 +299,10 @@ def _slug(title: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:32] or "change"
 
 
-def _free_port(taken: set[int]) -> int:
+def _free_port(taken: set[int], prefer: int | None = None) -> int:
     lo, hi = (_cfg().get("dev_ports") or [8091, 8099])
-    for port in range(int(lo), int(hi) + 1):
+    candidates = ([int(prefer)] if prefer else []) + list(range(int(lo), int(hi) + 1))
+    for port in candidates:
         if port in taken:
             continue
         with socket.socket() as s:
@@ -301,9 +326,9 @@ def _ensure_spa_built(wt: Path, log_file: Path) -> None:
                        stdout=lf, stderr=subprocess.STDOUT, timeout=600, env=_runner_env())
 
 
-def _start_dev_server(fid: str, wt: Path) -> dict:
+def _start_dev_server(fid: str, wt: Path, prefer_port: int | None = None) -> dict:
     taken = {(m.get("dev") or {}).get("port") for m in store.list_items()}
-    port = _free_port({p for p in taken if p})
+    port = _free_port({p for p in taken if p}, prefer=prefer_port)
     unit = f"dotaml-feedback-dev-{fid}"
     boot = ("import uvicorn; from dotaml_live.serving.app import create_app; "
             f"uvicorn.run(create_app(), host='0.0.0.0', port={port})")
@@ -333,14 +358,26 @@ def stage_implement(fid: str) -> None:
     store.update(fid, runner_pid=os.getpid())
     store.set_status(fid, "implementing")
 
+    # re-implement: keep the dev preview URL stable by reusing the prior port
+    prev_port = (meta.get("dev") or {}).get("port")
+
     slug = _slug(meta["ticket"]["title"])
     branch = f"feedback/{fid.rsplit('-', 1)[-1]}-{slug}"
     wt = WORKTREES / f"feedback-{fid}"
-    cleanup_workspace(fid)                      # clear any earlier attempt
+    cleanup_workspace(fid)                      # stop old preview, drop worktree+branch
     WORKTREES.mkdir(exist_ok=True)
     subprocess.run(["git", "worktree", "add", "-b", branch, str(wt), "master"],
                    cwd=str(REPO), check=True, capture_output=True, timeout=120)
-    meta = store.update(fid, branch=branch, worktree=str(wt))
+    meta = store.update(fid, branch=branch, worktree=str(wt), impl=None)
+
+    # voice comments need a transcript before they can go into the prompt
+    comments = meta.get("comments") or []
+    if any(c.get("audio") and not c.get("text") for c in comments):
+        from . import transcribe
+        for i, c in enumerate(comments):
+            if c.get("audio") and not c.get("text"):
+                c["text"] = transcribe.transcribe_file(store.comment_audio_path(fid, i))
+        meta = store.update(fid, comments=comments)
 
     # seed node_modules so the implementer's npm install/build is fast
     if (REPO / "frontend" / "node_modules").exists():
@@ -373,7 +410,7 @@ def stage_implement(fid: str) -> None:
     info["summary"] = summary_p.read_text().strip() if summary_p.exists() else None
 
     _ensure_spa_built(wt, log_file)
-    dev = _start_dev_server(fid, wt)
+    dev = _start_dev_server(fid, wt, prefer_port=prev_port)
     store.update(fid, impl=info, dev=dev)
     store.set_status(fid, "implemented")
 

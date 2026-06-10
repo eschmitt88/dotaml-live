@@ -134,9 +134,11 @@ def feedback_discard(fid: str):
 
 @router.post("/{fid}/retry")
 def feedback_retry(fid: str):
-    """Re-enter the pipeline at the right place after a failure."""
+    """Re-enter the pipeline at the right place after a failure, or re-run the
+    coding pass on an implemented item (e.g. after posting follow-up comments) —
+    the runner stops the old preview and reuses its port."""
     meta = _get(fid)
-    if meta["status"] not in ("failed", "captured", "discarded"):
+    if meta["status"] not in ("failed", "captured", "discarded", "implemented"):
         raise HTTPException(409, f"cannot retry from status {meta['status']}")
     if meta.get("ticket"):
         spawn_stage("implement", fid)
