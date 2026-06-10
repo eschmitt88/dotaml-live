@@ -661,20 +661,12 @@ const FB_CHIP = {
 }
 const FB_BUSY = ['captured', 'transcribing', 'triaging', 'implementing', 'accepting']
 
-function FeedbackComposer({ onSubmitted }) {
+function FeedbackComposer({ onSubmitted, recorder }) {
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
-  const [rec, setRec] = useState(false)
-  const [secs, setSecs] = useState(0)
   const [err, setErr] = useState(null)
-  const recRef = useRef(null)
+  const { rec, secs, busy: recBusy, err: recErr, toggle } = recorder
   const canRecord = !!navigator.mediaDevices?.getUserMedia
-
-  useEffect(() => {
-    if (!rec) return
-    const t = setInterval(() => setSecs((s) => s + 1), 1000)
-    return () => clearInterval(t)
-  }, [rec])
 
   const submitText = async () => {
     if (!text.trim()) return
@@ -684,27 +676,7 @@ function FeedbackComposer({ onSubmitted }) {
     setBusy(false)
   }
 
-  const toggleRec = async () => {
-    if (rec) { recRef.current?.stop(); return }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : ''
-      const mr = new MediaRecorder(stream, mime ? { mimeType: mime } : {})
-      const chunks = []
-      mr.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data) }
-      mr.onstop = async () => {
-        stream.getTracks().forEach((t) => t.stop())
-        setRec(false); setSecs(0)
-        setBusy(true)
-        try { await api.feedbackAudio(new Blob(chunks, { type: mr.mimeType || 'audio/webm' })); onSubmitted() }
-        catch (e) { setErr(String(e)) }
-        setBusy(false)
-      }
-      recRef.current = mr
-      mr.start()
-      setRec(true); setSecs(0); setErr(null)
-    } catch (e) { setErr(`mic unavailable: ${e.message}`) }
-  }
+  const showErr = err || recErr
 
   return (
     <div className="fb-composer card">
@@ -713,8 +685,8 @@ function FeedbackComposer({ onSubmitted }) {
         onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submitText() }} />
       <div className="fb-compose-row">
         {canRecord ? (
-          <button className={`fb-mic ${rec ? 'rec' : ''}`} onClick={toggleRec} disabled={busy}>
-            {rec ? `■ stop (${secs}s)` : '🎤 record'}
+          <button className={`fb-mic ${rec ? 'rec' : ''}`} onClick={toggle} disabled={busy || recBusy}>
+            {rec ? `■ stop (${secs}s)` : recBusy ? 'sending…' : '🎤 record'}
           </button>
         ) : (
           <span className="muted" title="getUserMedia needs HTTPS or localhost — open via localhost, or enable chrome://flags/#unsafely-treat-insecure-origin-as-secure for this origin">
@@ -722,7 +694,7 @@ function FeedbackComposer({ onSubmitted }) {
           </span>
         )}
         <span className="fb-spacer" />
-        {err && <span className="err inline">{err}</span>}
+        {showErr && <span className="err inline">{showErr}</span>}
         <button onClick={submitText} disabled={busy || !text.trim()}>
           {busy ? 'sending…' : 'Submit'}
         </button>
@@ -825,7 +797,7 @@ function FeedbackItem({ item, onChanged, onErr }) {
   )
 }
 
-function FeedbackTab() {
+function FeedbackTab({ recorder }) {
   const [items, setItems] = useState(null)
   const [err, setErr] = useState(null)
   const [showArchive, setShowArchive] = useState(false)
@@ -859,7 +831,7 @@ function FeedbackTab() {
             spins up an implementation on a branch with a dev preview to test, and accepting deploys it here.</p>
         </div>
       </div>
-      <FeedbackComposer onSubmitted={load} />
+      <FeedbackComposer onSubmitted={load} recorder={recorder} />
       {err && <p className="err">{err}</p>}
       {items.length === 0 && <p className="muted">Queue is empty — say what you wish this app did better.</p>}
       {groups.map(([name, list, cls]) => list.length > 0 && (
@@ -892,6 +864,51 @@ export default function App() {
   const [pendingShot, setPendingShot] = useState(null)
   const [fbCount, setFbCount] = useState(0)
   const [apiStatus, setApiStatus] = useState('unknown')   // 'unknown' | 'ok' | 'error'
+
+  // Recording state lives here (not in FeedbackComposer) so switching tabs
+  // never tears down the MediaRecorder mid-recording.
+  const [rec, setRec] = useState(false)
+  const [recSecs, setRecSecs] = useState(0)
+  const [recBusy, setRecBusy] = useState(false)
+  const [recErr, setRecErr] = useState(null)
+  const recRef = useRef(null)
+
+  useEffect(() => {
+    if (!rec) return
+    const t = setInterval(() => setRecSecs((s) => s + 1), 1000)
+    return () => clearInterval(t)
+  }, [rec])
+
+  const toggleRec = async () => {
+    if (rec) { recRef.current?.stop(); return }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : ''
+      const mr = new MediaRecorder(stream, mime ? { mimeType: mime } : {})
+      const chunks = []
+      let lostMic = false
+      // Fires only when the mic dies externally (permission revoked, device
+      // unplugged) — not when we stop the tracks ourselves below.
+      stream.getTracks().forEach((t) => {
+        t.onended = () => { lostMic = true; setRecErr('microphone lost mid-recording — audio discarded') }
+      })
+      mr.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data) }
+      mr.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop())
+        setRec(false); setRecSecs(0)
+        if (lostMic) return
+        setRecBusy(true)
+        try { await api.feedbackAudio(new Blob(chunks, { type: mr.mimeType || 'audio/webm' })) }
+        catch (e) { setRecErr(String(e)) }
+        setRecBusy(false)
+      }
+      recRef.current = mr
+      mr.start()
+      setRec(true); setRecSecs(0); setRecErr(null)
+    } catch (e) { setRecErr(`mic unavailable: ${e.message}`) }
+  }
+
+  const recorder = { rec, secs: recSecs, busy: recBusy, err: recErr, toggle: toggleRec }
 
   useEffect(() => {
     const probe = () => api.health().then(() => setApiStatus('ok')).catch(() => setApiStatus('error'))
@@ -950,7 +967,8 @@ export default function App() {
           <button className={tab === 'discover' ? 'on' : ''} onClick={() => setTab('discover')}>Combo discovery</button>
           <button className={tab === 'shots' ? 'on' : ''} onClick={() => setTab('shots')}>Screenshots</button>
           <button className={tab === 'feedback' ? 'on' : ''} onClick={() => setTab('feedback')}>
-            Feedback{fbCount > 0 && <span className="fb-badge">{fbCount}</span>}
+            Feedback{rec && <span className="rec-dot" title="recording in progress" />}
+            {fbCount > 0 && <span className="fb-badge">{fbCount}</span>}
           </button>
         </nav>
         <span className="model">
@@ -959,15 +977,15 @@ export default function App() {
           model: {model?.version ?? '?'} · {model?.device ?? '?'}
         </span>
       </header>
-      {tab === 'draft'
-        ? <DraftTab meta={meta} draft={draft} setDraft={setDraft} nHeroes={model?.n_heroes}
-            pendingShot={pendingShot} setPendingShot={setPendingShot} />
-        : tab === 'discover'
-          ? <DiscoverTab onAdd={addCombo} />
-          : tab === 'feedback'
-            ? <FeedbackTab />
-            : <ShotsTab onReview={reviewShot}
-                heroById={Object.fromEntries(meta.heroes.map((h) => [h.id, h]))} />}
+      {tab === 'draft' && <DraftTab meta={meta} draft={draft} setDraft={setDraft} nHeroes={model?.n_heroes}
+        pendingShot={pendingShot} setPendingShot={setPendingShot} />}
+      {tab === 'discover' && <DiscoverTab onAdd={addCombo} />}
+      {tab === 'shots' && <ShotsTab onReview={reviewShot}
+        heroById={Object.fromEntries(meta.heroes.map((h) => [h.id, h]))} />}
+      {/* Feedback stays mounted (just hidden) so the composer survives tab switches */}
+      <div style={tab === 'feedback' ? undefined : { display: 'none' }}>
+        <FeedbackTab recorder={recorder} />
+      </div>
     </div>
   )
 }
