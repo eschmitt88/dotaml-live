@@ -876,6 +876,14 @@ export default function App() {
   const [draft, setDraft] = useState(SAMPLE)
   const [pendingShot, setPendingShot] = useState(null)
   const [fbCount, setFbCount] = useState(0)
+  const [apiStatus, setApiStatus] = useState('unknown')   // 'unknown' | 'ok' | 'error'
+
+  useEffect(() => {
+    const probe = () => api.health().then(() => setApiStatus('ok')).catch(() => setApiStatus('error'))
+    probe()
+    const t = setInterval(probe, 20000)
+    return () => clearInterval(t)
+  }, [])
 
   useEffect(() => {
     const pull = () => api.feedback().then((r) =>
@@ -930,7 +938,11 @@ export default function App() {
             Feedback{fbCount > 0 && <span className="fb-badge">{fbCount}</span>}
           </button>
         </nav>
-        <span className="model">model: {model?.version ?? '?'} · {model?.device ?? '?'}</span>
+        <span className="model">
+          <span className={`status-dot ${apiStatus}`}
+            title={apiStatus === 'ok' ? 'API connected' : apiStatus === 'error' ? 'API unreachable' : 'API status unknown'} />
+          model: {model?.version ?? '?'} · {model?.device ?? '?'}
+        </span>
       </header>
       {tab === 'draft'
         ? <DraftTab meta={meta} draft={draft} setDraft={setDraft} nHeroes={model?.n_heroes}
