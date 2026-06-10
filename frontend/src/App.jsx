@@ -24,7 +24,7 @@ function usePersist(key, initial) {
 }
 
 // ---- searchable, alphabetical, clearable hero picker ----
-function HeroCombo({ heroes, value, onChange, placeholder = '— empty —', nHeroes }) {
+function HeroCombo({ heroes, value, onChange, placeholder = '— empty —', nHeroes, onTabCommit }) {
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
   const [hi, setHi] = useState(0)
@@ -46,7 +46,7 @@ function HeroCombo({ heroes, value, onChange, placeholder = '— empty —', nHe
     else if (e.key === 'Enter') { e.preventDefault(); if (matches[hi]) pick(matches[hi]) }
     else if (e.key === 'Tab') {
       // commit the highlighted hero instead of cancelling, when a query is typed
-      if (q.trim() && matches[hi]) { e.preventDefault(); pick(matches[hi]) }
+      if (q.trim() && matches[hi]) { e.preventDefault(); pick(matches[hi]); onTabCommit && onTabCommit() }
       else { setOpen(false); setQ('') }
     }
     else if (e.key === 'Escape') { setOpen(false); setQ('') }
@@ -301,6 +301,18 @@ function DraftTab({ meta, draft, setDraft, nHeroes, pendingShot, setPendingShot 
   const sideOrder = mySide === 'radiant' ? ['radiant', 'dire'] : ['dire', 'radiant']
   const slotName = (i) => (draft[i] ? heroById[draft[i]]?.name : '—')
 
+  // after a Tab-commit, move to the next slot's combo in visual order (stay on the last one)
+  const tabToNext = (i) => {
+    const order = sideOrder.flatMap((s) => (s === 'radiant' ? RAD : DIRE))
+    const next = order[order.indexOf(i) + 1]
+    setTimeout(() => {  // wait for the picked combo to close and re-render
+      const btn = document.querySelector(`.teams .slot[data-slot="${next ?? i}"] .combo-btn`)
+      if (!btn) return
+      if (next != null) btn.click()  // opens the combo — its input autofocuses
+      else btn.focus()
+    }, 0)
+  }
+
   const Team = ({ side }) => {
     const idxs = side === 'radiant' ? RAD : DIRE
     const mine = side === mySide
@@ -311,10 +323,11 @@ function DraftTab({ meta, draft, setDraft, nHeroes, pendingShot, setPendingShot 
           {mine && <span className="you">you</span>}
         </div>
         {idxs.map((i) => (
-          <div key={i} className={`slot ${focusSlot === i ? 'focus' : ''}`}>
+          <div key={i} data-slot={i} className={`slot ${focusSlot === i ? 'focus' : ''}`}>
             <button className="rec-dot" title="recommend for this slot"
               onClick={() => setFocusSlot(i)}>{focusSlot === i ? '◉' : '○'}</button>
-            <HeroCombo heroes={heroes} value={draft[i]} onChange={(v) => setHero(i, v)} nHeroes={nHeroes} />
+            <HeroCombo heroes={heroes} value={draft[i]} onChange={(v) => setHero(i, v)} nHeroes={nHeroes}
+              onTabCommit={() => tabToNext(i)} />
             {draft[i] !== 0 && (
               <button className="fav-star" title="favorite"
                 onClick={() => toggleFav(draft[i])}>{favorites.includes(draft[i]) ? '★' : '☆'}</button>
@@ -368,11 +381,13 @@ function DraftTab({ meta, draft, setDraft, nHeroes, pendingShot, setPendingShot 
           pending={pendingShot} setPending={setPendingShot} />
 
         <div className="teams">
-          <Team side={sideOrder[0]} />
+          {/* render Team as a plain call: an inline component type would remount (and close an
+              open combo, dropping focus mid-typing) on every auto-recompute re-render */}
+          {Team({ side: sideOrder[0] })}
           <button className="swap-btn" title="swap heroes between Radiant and Dire" onClick={swapSides}>
             ⇅ swap sides
           </button>
-          <Team side={sideOrder[1]} />
+          {Team({ side: sideOrder[1] })}
         </div>
 
         <div className="favs">
