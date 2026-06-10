@@ -120,6 +120,78 @@ function PlayerPicker({ players, value, onPick }) {
   )
 }
 
+// ---- screenshot → draft (paste / drop / pick a Dota screenshot) ----
+// After a fill, the shot sits in the server's labeling queue; fixing the
+// slots and hitting ✓ stores the corrected board as its ground truth.
+function ScreenshotFill({ onDraft, draft, pending, setPending }) {
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState(null)
+  const [drag, setDrag] = useState(false)
+  const fileRef = useRef(null)
+  const busyRef = useRef(false)
+
+  const handle = async (blob) => {
+    if (!blob || !blob.type.startsWith('image/') || busyRef.current) return
+    busyRef.current = true
+    setBusy(true); setMsg(null); setPending(null)
+    try {
+      const r = await api.draftFromScreenshot(blob)
+      const n = r.detections.length
+      onDraft([...r.radiant, ...r.dire])
+      if (r.shot_id && !r.already_labeled) setPending(r.shot_id)
+      setMsg(n
+        ? { ok: true, text: `found ${n}/10 heroes in ${(r.elapsed_ms / 1000).toFixed(1)}s` }
+        : { ok: false, text: 'no heroes found — include the top bar in the shot' })
+    } catch (e) { setMsg({ ok: false, text: String(e) }) }
+    busyRef.current = false
+    setBusy(false)
+  }
+
+  const confirm = async () => {
+    try {
+      await api.labelScreenshot(pending, {
+        radiant: draft.slice(0, 5), dire: draft.slice(5), labeled_by: 'human' })
+      setMsg({ ok: true, text: 'ground truth saved ✓' })
+      setPending(null)
+    } catch (e) { setMsg({ ok: false, text: String(e) }) }
+  }
+
+  useEffect(() => {
+    const onPaste = (e) => {
+      if (/INPUT|TEXTAREA/.test(e.target?.tagName || '')) return
+      const item = [...(e.clipboardData?.items || [])].find((i) => i.type.startsWith('image/'))
+      if (item) { e.preventDefault(); handle(item.getAsFile()) }
+    }
+    window.addEventListener('paste', onPaste)
+    return () => window.removeEventListener('paste', onPaste)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  return (
+    <div className={`shot ${drag ? 'drag' : ''} ${busy ? 'busy' : ''}`}
+      onDragOver={(e) => { e.preventDefault(); setDrag(true) }}
+      onDragLeave={() => setDrag(false)}
+      onDrop={(e) => { e.preventDefault(); setDrag(false); handle(e.dataTransfer.files?.[0]) }}
+      onClick={() => !busy && fileRef.current?.click()}>
+      <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }}
+        onChange={(e) => { handle(e.target.files?.[0]); e.target.value = '' }} />
+      <span className="shot-main">
+        {busy ? '⏳ reading screenshot…' : <>📷 <b>Screenshot → draft</b></>}
+      </span>
+      {!busy && !pending && <span className="shot-hint">paste (Ctrl+V), drop, or click</span>}
+      {msg && <span className={`shot-msg ${msg.ok ? 'ok' : 'bad'}`}>{msg.text}</span>}
+      {pending && !busy && (
+        <span className="shot-confirm" onClick={(e) => e.stopPropagation()}>
+          <span className="shot-hint">fix any wrong slots, then</span>
+          <button className="shot-ok" onClick={confirm}>✓ confirm ground truth</button>
+          <button className="shot-skip" title="leave in the labeling queue"
+            onClick={() => setPending(null)}>later</button>
+        </span>
+      )}
+    </div>
+  )
+}
+
 function Card({ title, sub, right, children, className = '' }) {
   return (
     <div className={`card ${className}`}>
@@ -134,7 +206,7 @@ function Card({ title, sub, right, children, className = '' }) {
 
 // ---------------- Draft analysis tab ----------------
 
-function DraftTab({ meta, draft, setDraft, nHeroes }) {
+function DraftTab({ meta, draft, setDraft, nHeroes, pendingShot, setPendingShot }) {
   const heroes = useMemo(
     () => [...meta.heroes].sort((a, b) => a.name.localeCompare(b.name)), [meta])
   const heroById = useMemo(() => {
@@ -291,6 +363,9 @@ function DraftTab({ meta, draft, setDraft, nHeroes }) {
             </label>
           </div>
         )}
+
+        <ScreenshotFill onDraft={(d) => setDraft(d)} draft={draft}
+          pending={pendingShot} setPending={setPendingShot} />
 
         <div className="teams">
           <Team side={sideOrder[0]} />
@@ -506,6 +581,60 @@ function DiscoverTab({ onAdd }) {
   )
 }
 
+// ---------------- Screenshot labeling queue tab ----------------
+
+function ShotsTab({ heroById, onReview }) {
+  const [shots, setShots] = useState(null)
+  const [err, setErr] = useState(null)
+  const load = () => api.screenshots().then((r) => setShots(r.shots)).catch((e) => setErr(String(e)))
+  useEffect(() => { load() }, [])
+
+  if (err) return <p className="err">{err}</p>
+  if (!shots) return <p>Loading screenshots…</p>
+
+  const unlabeled = shots.filter((s) => !s.ground_truth).length
+  const names = (ids) => ids.filter(Boolean).map((id) => heroById[id]?.name || `#${id}`).join(', ')
+
+  return (
+    <section className="shots-tab">
+      <div className="disco-head">
+        <div>
+          <h2>Screenshot labeling queue</h2>
+          <p className="sub">Every screenshot pasted on the Draft tab is saved here.
+            {' '}{shots.length} saved · <b>{unlabeled} awaiting ground truth</b> — review one,
+            fix the slots on the draft board, and confirm. Labels feed
+            {' '}<code>scripts/eval_screenshot_detector.py</code>.</p>
+        </div>
+      </div>
+      {shots.length === 0 && <p className="muted">Nothing yet — paste a screenshot on the Draft tab.</p>}
+      <div className="shot-list">
+        {shots.map((s) => (
+          <div key={s.id} className={`shot-row ${s.ground_truth ? 'labeled' : ''}`}>
+            <img src={`/api/screenshots/${s.id}/image`} loading="lazy" alt={s.id}
+              onClick={() => window.open(`/api/screenshots/${s.id}/image`, '_blank')} />
+            <div className="shot-info">
+              <div className="shot-id">{s.created.replace('T', ' ').replace('Z', '')}
+                {s.ground_truth
+                  ? <span className="shot-badge ok">labeled · {s.labeled_by}</span>
+                  : <span className="shot-badge">unlabeled</span>}
+              </div>
+              <div className="shot-heroes">
+                detected: {s.detected?.detections?.length ?? 0}/10
+                {s.detected?.detections?.length > 0 && <> — {names([...(s.detected.radiant || []), ...(s.detected.dire || [])])}</>}
+              </div>
+            </div>
+            <div className="shot-actions">
+              <button onClick={() => onReview(s)}>review on board</button>
+              <button className="shot-del" title="delete screenshot"
+                onClick={() => api.deleteScreenshot(s.id).then(load).catch((e) => setErr(String(e)))}>✕</button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
 // ---------------- App shell ----------------
 
 export default function App() {
@@ -515,6 +644,15 @@ export default function App() {
   const [tab, setTab] = useState('draft')
   const [patch, setPatch] = useState(null)
   const [draft, setDraft] = useState(SAMPLE)
+  const [pendingShot, setPendingShot] = useState(null)
+
+  const reviewShot = (s) => {
+    // load the shot's detections (or its label, if revisiting) onto the board
+    const src = s.ground_truth || s.detected
+    setDraft([...(src.radiant || []), ...(src.dire || [])].slice(0, 10))
+    setPendingShot(s.id)
+    setTab('draft')
+  }
 
   const addCombo = (ids) => {
     const nd = Array(10).fill(0)
@@ -547,12 +685,17 @@ export default function App() {
         <nav className="tabs">
           <button className={tab === 'draft' ? 'on' : ''} onClick={() => setTab('draft')}>Draft analysis</button>
           <button className={tab === 'discover' ? 'on' : ''} onClick={() => setTab('discover')}>Combo discovery</button>
+          <button className={tab === 'shots' ? 'on' : ''} onClick={() => setTab('shots')}>Screenshots</button>
         </nav>
         <span className="model">model: {model?.version ?? '?'} · {model?.device ?? '?'}</span>
       </header>
       {tab === 'draft'
-        ? <DraftTab meta={meta} draft={draft} setDraft={setDraft} nHeroes={model?.n_heroes} />
-        : <DiscoverTab onAdd={addCombo} />}
+        ? <DraftTab meta={meta} draft={draft} setDraft={setDraft} nHeroes={model?.n_heroes}
+            pendingShot={pendingShot} setPendingShot={setPendingShot} />
+        : tab === 'discover'
+          ? <DiscoverTab onAdd={addCombo} />
+          : <ShotsTab onReview={reviewShot}
+              heroById={Object.fromEntries(meta.heroes.map((h) => [h.id, h]))} />}
     </div>
   )
 }

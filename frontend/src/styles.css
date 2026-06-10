@@ -178,3 +178,33 @@ button.more { margin-top:12px; }
   .board { grid-template-columns:1fr; }
   .pred-row { grid-template-columns:1fr; }
 }
+
+/* screenshot → draft */
+.shot { background:var(--panel); border:1px dashed var(--line); border-radius:10px; padding:9px 12px; cursor:pointer; display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; transition:border-color .1s, background .1s; }
+.shot:hover { border-color:var(--blue); }
+.shot.drag { border-color:var(--blue); background:#16202b; }
+.shot.busy { cursor:wait; }
+.shot-main { font-size:13px; }
+.shot-hint { color:var(--mut); font-size:12px; }
+.shot-msg { font-size:12px; margin-left:auto; }
+.shot-msg.ok { color:var(--grn); }
+.shot-msg.bad { color:var(--red); }
+
+/* ground-truth confirm flow */
+.shot-confirm { display:flex; align-items:center; gap:8px; margin-left:auto; }
+.shot-ok { background:var(--grn); padding:4px 10px; font-size:12px; }
+.shot-skip { background:#0c1116; border:1px solid var(--line); color:var(--mut); padding:4px 8px; font-size:12px; }
+
+/* screenshot labeling queue tab */
+.shot-list { display:flex; flex-direction:column; gap:10px; margin-top:14px; }
+.shot-row { display:flex; align-items:center; gap:14px; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px 12px; }
+.shot-row.labeled { opacity:.75; }
+.shot-row img { width:220px; max-height:70px; object-fit:cover; object-position:top; border-radius:6px; border:1px solid var(--line); cursor:zoom-in; }
+.shot-info { flex:1; min-width:0; }
+.shot-id { font-size:13px; font-weight:600; display:flex; align-items:center; gap:10px; }
+.shot-badge { font-size:11px; padding:1px 7px; border-radius:9px; background:#3a2e0c; color:#f0d98a; font-weight:400; }
+.shot-badge.ok { background:#10301d; color:#5fd38a; }
+.shot-heroes { color:var(--mut); font-size:12px; margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.shot-actions { display:flex; gap:8px; flex:none; }
+.shot-del { background:#0c1116; border:1px solid var(--line); color:var(--mut); }
+.shot-del:hover { color:var(--red); border-color:var(--red); }

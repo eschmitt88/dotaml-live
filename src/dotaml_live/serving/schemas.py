@@ -31,6 +31,13 @@ class ItemBuildReq(DraftReq):
     beam_width: int = 32
 
 
+class ShotLabelReq(BaseModel):
+    """Ground-truth draft for a saved screenshot. 0 = slot empty in the shot."""
+    radiant: list[int] = Field(..., min_length=5, max_length=5)
+    dire: list[int] = Field(..., min_length=5, max_length=5)
+    labeled_by: str = "human"      # "human" | "claude"
+
+
 class HeroCombosReq(BaseModel):
     pool: list[int] | None = None
     size: int = Field(2, ge=2, le=3)

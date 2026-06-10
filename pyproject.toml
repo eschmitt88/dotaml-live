@@ -15,6 +15,7 @@ dependencies = [
     "tqdm>=4.66",
     "scikit-learn>=1.4",
     "matplotlib>=3.8",
+    "opencv-python-headless>=4.10",
 ]
 
 [project.optional-dependencies]
