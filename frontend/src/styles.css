@@ -268,3 +268,10 @@ button.more { margin-top:12px; }
 .fb-meta { color:var(--mut); font-size:11px; margin:6px 0 0; }
 .fb-meta code { background:#0c1116; padding:1px 5px; border-radius:4px; }
 .fb-log { background:#0c1116; border:1px solid var(--line); border-radius:8px; padding:10px; margin-top:8px; max-height:300px; overflow:auto; font:11px/1.5 ui-monospace,monospace; white-space:pre-wrap; color:var(--mut); }
+
+.fb-comments { border-top:1px dashed var(--line); margin-top:10px; padding-top:8px; font-size:13px; }
+.fb-comment { display:flex; align-items:center; gap:8px; margin:4px 0; }
+.fb-comment-when { color:var(--mut); font-size:11px; white-space:nowrap; }
+.fb-comment-text { white-space:pre-wrap; }
+.fb-comment audio { height:28px; max-width:320px; }
+.fb-comment-composer { margin:8px 0 0; }

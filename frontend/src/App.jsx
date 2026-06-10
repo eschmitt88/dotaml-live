@@ -717,13 +717,91 @@ function FbLog({ id, live }) {
   return <pre className="fb-log" ref={boxRef}>{log || '(no log yet)'}</pre>
 }
 
+function FbCommentComposer({ id, onSubmitted }) {
+  const [text, setText] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+  const [rec, setRec] = useState(false)
+  const [secs, setSecs] = useState(0)
+  const [recBusy, setRecBusy] = useState(false)
+  const mrRef = useRef(null)
+  const canRecord = !!navigator.mediaDevices?.getUserMedia
+
+  useEffect(() => {
+    if (!rec) return
+    const t = setInterval(() => setSecs((s) => s + 1), 1000)
+    return () => clearInterval(t)
+  }, [rec])
+
+  const submitText = async () => {
+    if (!text.trim()) return
+    setBusy(true); setErr(null)
+    try { await api.feedbackComment(id, text.trim()); setText(''); onSubmitted() }
+    catch (e) { setErr(String(e)) }
+    setBusy(false)
+  }
+
+  const toggle = async () => {
+    if (rec) { mrRef.current?.stop(); return }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : ''
+      const mr = new MediaRecorder(stream, mime ? { mimeType: mime } : {})
+      const chunks = []
+      let lostMic = false
+      stream.getTracks().forEach((t) => {
+        t.onended = () => { lostMic = true; setErr('microphone lost mid-recording — audio discarded') }
+      })
+      mr.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data) }
+      mr.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop())
+        setRec(false); setSecs(0)
+        if (lostMic) return
+        setRecBusy(true)
+        try { await api.feedbackCommentAudio(id, new Blob(chunks, { type: mr.mimeType || 'audio/webm' })); onSubmitted() }
+        catch (e) { setErr(String(e)) }
+        setRecBusy(false)
+      }
+      mrRef.current = mr
+      mr.start()
+      setRec(true); setSecs(0); setErr(null)
+    } catch (e) { setErr(`mic unavailable: ${e.message}`) }
+  }
+
+  return (
+    <div className="fb-composer fb-comment-composer">
+      <textarea value={text} placeholder="Comment on this ticket — or hit the mic and just talk…"
+        rows={2} autoFocus onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submitText() }} />
+      <div className="fb-compose-row">
+        {canRecord ? (
+          <button className={`fb-mic ${rec ? 'rec' : ''}`} onClick={toggle} disabled={busy || recBusy}>
+            {rec ? `■ stop (${secs}s)` : recBusy ? 'sending…' : '🎤 record'}
+          </button>
+        ) : (
+          <span className="muted" title="getUserMedia needs HTTPS or localhost — open via localhost, or enable chrome://flags/#unsafely-treat-insecure-origin-as-secure for this origin">
+            🎤 voice needs HTTPS / localhost
+          </span>
+        )}
+        <span className="fb-spacer" />
+        {err && <span className="err inline">{err}</span>}
+        <button onClick={submitText} disabled={busy || !text.trim()}>
+          {busy ? 'sending…' : 'Submit'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function FeedbackItem({ item, onChanged, onErr }) {
   const [open, setOpen] = useState(false)
   const [showLog, setShowLog] = useState(false)
   const [acting, setActing] = useState(false)
+  const [composing, setComposing] = useState(false)
   const [label, kind] = FB_CHIP[item.status] || [item.status, 'off']
   const t = item.ticket
   const busy = FB_BUSY.includes(item.status)
+  const canComment = ['implemented', 'triaged'].includes(item.status)
   const devUrl = item.status === 'implemented' && item.dev
     ? `http://${window.location.hostname}:${item.dev.port}/` : null
 
@@ -764,12 +842,30 @@ function FeedbackItem({ item, onChanged, onErr }) {
         {['done', 'rejected', 'discarded'].includes(item.status) &&
           <button className="ghost danger" disabled={acting}
             onClick={() => act(null, () => api.deleteFeedback(item.id))}>✕ remove</button>}
+        {canComment &&
+          <button className="ghost" onClick={() => setComposing((s) => !s)}>
+            {composing ? 'hide comment' : '💬 comment'}</button>}
         {(item.status === 'implementing' || item.status === 'accepting' || item.impl) &&
           <button className="ghost" onClick={() => setShowLog((s) => !s)}>
             {showLog ? 'hide log' : 'show log'}</button>}
       </div>
 
       {showLog && <FbLog id={item.id} live={busy} />}
+
+      {(item.comments?.length > 0 || composing) && (
+        <div className="fb-comments" onClick={(e) => e.stopPropagation()}>
+          {item.comments?.map((c, i) => (
+            <div key={i} className="fb-comment">
+              <span className="fb-comment-when">{c.at.slice(5, 16).replace('T', ' ')}</span>
+              {c.source === 'voice'
+                ? <audio controls preload="none" src={`/api/feedback/${item.id}/comment/${i}/audio`} />
+                : <span className="fb-comment-text">{c.text}</span>}
+            </div>
+          ))}
+          {composing && <FbCommentComposer id={item.id}
+            onSubmitted={() => { setComposing(false); onChanged() }} />}
+        </div>
+      )}
 
       {open && (
         <div className="fb-detail">
