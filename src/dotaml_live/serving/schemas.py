@@ -52,3 +52,11 @@ class HeroCombosReq(BaseModel):
     size: int = Field(2, ge=2, le=3)
     mode: str = "synergy"          # "synergy" | "kills_per_min"
     top_k: int = 15
+
+
+class ComboExplainReq(BaseModel):
+    """One combo row from the Discover table; heroes by localized name."""
+    heroes: list[str] = Field(..., min_length=2, max_length=3)
+    synergy: float
+    avg_winprob: float | None = None
+    kpm: float | None = None

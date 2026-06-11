@@ -10,7 +10,7 @@ from ...queries import queries, hero_combos as hc
 from ...queries.build_optimizer import optimize_build, format_plan
 from ...queries.lookups import hero_name, item_name
 from ..schemas import (DraftReq, WinDurationReq, HeroPicksReq, ItemBuildReq, HeroCombosReq,
-                       ShotLabelReq)
+                       ComboExplainReq, ShotLabelReq)
 
 router = APIRouter(prefix="/api", tags=["queries"])
 
@@ -78,6 +78,18 @@ def hero_combos(req: HeroCombosReq, request: Request):
     f = _model(request)
     combos = hc.hero_combos(f, pool=req.pool, size=req.size, mode=req.mode, top_k=req.top_k)
     return {"mode": req.mode, "size": req.size, "combos": [asdict(c) for c in combos]}
+
+
+@router.post("/combos/explain")
+def combos_explain(req: ComboExplainReq):
+    """On-demand Claude explanation of why a combo synergizes (one-shot, no cache)."""
+    from .. import combo_explain
+    try:
+        text = combo_explain.explain(heroes=req.heroes, synergy=req.synergy,
+                                     avg_winprob=req.avg_winprob, kpm=req.kpm)
+    except RuntimeError as e:
+        raise HTTPException(502, str(e))
+    return {"explanation": text}
 
 
 @router.post("/draft-from-screenshot")

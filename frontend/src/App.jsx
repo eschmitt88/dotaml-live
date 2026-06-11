@@ -628,6 +628,19 @@ function DiscoverTab({ onAdd }) {
   const [limit, setLimit] = useState(150)
   const [showFilters, setShowFilters] = useState(false)
   const [ranges, setRanges] = useState({})        // metric key -> [lo, hi]; absent = full range
+  const [explain, setExplain] = useState(null)    // {names, loading, text?, error?} -> modal
+
+  const explainCombo = (c) => {
+    if (explain?.loading) return
+    setExplain({ names: c.names, loading: true })
+    api.explainCombo({ heroes: c.names, synergy: c.synergy, avg_winprob: c.avg_winprob, kpm: c.kpm })
+      .then((r) => setExplain((e) => e && { names: e.names, loading: false, text: r.explanation }))
+      .catch((err) => {
+        // api.post throws `path -> status {"detail": "..."}`; surface the detail if present
+        const m = String(err.message || err).match(/"detail"\s*:\s*"([^"]+)"/)
+        setExplain((e) => e && { names: e.names, loading: false, error: m ? m[1] : String(err.message || err) })
+      })
+  }
 
   useEffect(() => { api.combosTable().then(setData).catch((e) => setErr(String(e))) }, [])
   useEffect(() => { setLimit(150) }, [size, q, sortKey, ranges])
@@ -746,8 +759,10 @@ function DiscoverTab({ onAdd }) {
                 </td>
                 <td>{c.kpm.toFixed(2)}</td>
                 <td><div className="funbar"><div style={{ width: `${(c.fun / 2) * 100}%` }} /></div></td>
-                <td><button className="add-draft" title="add to draft (Radiant)"
-                  onClick={() => onAdd(c.ids)}>＋ Draft</button></td>
+                <td className="row-actions"><button className="add-draft" title="add to draft (Radiant)"
+                  onClick={() => onAdd(c.ids)}>＋ Draft</button>
+                  <button className="explain-btn" title="ask Claude why this combo works"
+                    disabled={explain?.loading} onClick={() => explainCombo(c)}>✨</button></td>
               </tr>
             )
           })}
@@ -755,6 +770,24 @@ function DiscoverTab({ onAdd }) {
       </table>
       {view.length > limit &&
         <button className="more" onClick={() => setLimit((l) => l + 150)}>show more</button>}
+      {explain && (
+        <div className="modal-overlay" onClick={() => setExplain(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <h3>✨ {explain.names.join(' + ')}</h3>
+              <button className="modal-close" title="close" onClick={() => setExplain(null)}>✕</button>
+            </div>
+            {explain.loading && <p className="modal-wait"><span className="spinner" /> Asking Claude…</p>}
+            {explain.text && <p className="modal-text">{explain.text}</p>}
+            {explain.error && (
+              <div>
+                <p className="err">Could not generate explanation</p>
+                <p className="modal-err-detail">{explain.error}</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </section>
   )
 }
