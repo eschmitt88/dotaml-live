@@ -581,6 +581,9 @@ function DraftTab({ meta, draft, setDraft, nHeroes, pendingShot, setPendingShot 
 
 // ---------------- Combo discovery tab ----------------
 
+// flag combos whose side-averaged win rate is below par, even with positive synergy
+const LOW_WINRATE_THRESHOLD = 0.50
+
 function AttrTag({ a }) {
   return <span className="attr" style={{ background: ATTR_COLOR[a] || '#888' }}>{a}</span>
 }
@@ -651,25 +654,33 @@ function DiscoverTab({ onAdd }) {
         <thead>
           <tr>
             <th>#</th><th>Combo</th>
-            <Th k="synergy">Synergy</Th><Th k="kpm">Kills/min</Th><Th k="fun">Fun</Th><th></th>
+            <Th k="synergy">Synergy</Th><th>Win rate</th><Th k="kpm">Kills/min</Th><Th k="fun">Fun</Th><th></th>
           </tr>
         </thead>
         <tbody>
-          {view.slice(0, limit).map((c, i) => (
-            <tr key={c.ids.join('-')}>
-              <td className="rank">{i + 1}</td>
-              <td className="combo">
-                {c.names.map((n, j) => (
-                  <span key={j}>{j > 0 && <span className="plus">+</span>}<AttrTag a={c.attrs[j]} /> {n} </span>
-                ))}
-              </td>
-              <td className={c.synergy >= 0 ? 'pos' : 'neg'}>{c.synergy >= 0 ? '+' : ''}{(c.synergy * 100).toFixed(2)}%</td>
-              <td>{c.kpm.toFixed(2)}</td>
-              <td><div className="funbar"><div style={{ width: `${(c.fun / 2) * 100}%` }} /></div></td>
-              <td><button className="add-draft" title="add to draft (Radiant)"
-                onClick={() => onAdd(c.ids)}>＋ Draft</button></td>
-            </tr>
-          ))}
+          {view.slice(0, limit).map((c, i) => {
+            const lowWr = c.avg_winprob != null && c.avg_winprob < LOW_WINRATE_THRESHOLD
+            return (
+              <tr key={c.ids.join('-')} className={lowWr ? 'low-wr' : ''}>
+                <td className="rank">{i + 1}</td>
+                <td className="combo">
+                  {c.names.map((n, j) => (
+                    <span key={j}>{j > 0 && <span className="plus">+</span>}<AttrTag a={c.attrs[j]} /> {n} </span>
+                  ))}
+                </td>
+                <td className={c.synergy >= 0 ? 'pos' : 'neg'}>{c.synergy >= 0 ? '+' : ''}{(c.synergy * 100).toFixed(2)}%</td>
+                <td className={lowWr ? 'wr-low' : ''}>
+                  {c.avg_winprob != null ? (c.avg_winprob * 100).toFixed(1) + '%' : '—'}
+                  {lowWr && <span className="wr-flag"
+                    title={`combined win rate below ${LOW_WINRATE_THRESHOLD * 100}% despite synergy`}>⚠</span>}
+                </td>
+                <td>{c.kpm.toFixed(2)}</td>
+                <td><div className="funbar"><div style={{ width: `${(c.fun / 2) * 100}%` }} /></div></td>
+                <td><button className="add-draft" title="add to draft (Radiant)"
+                  onClick={() => onAdd(c.ids)}>＋ Draft</button></td>
+              </tr>
+            )
+          })}
         </tbody>
       </table>
       {view.length > limit &&
