@@ -41,9 +41,10 @@ FEEDBACK_DIR = paths.DATA_DIR / "feedback"
 _FID_RE = re.compile(r"^\d{8}-\d{6}-[0-9a-f]{8}$")
 
 STATUSES = {"captured", "transcribing", "triaging", "triaged", "rejected",
-            "implementing", "implemented", "accepting", "done", "discarded", "failed"}
+            "implementing", "implemented", "resolving", "accepting", "done",
+            "discarded", "failed"}
 # statuses owned by a live runner process (carry runner_pid)
-ACTIVE = {"transcribing", "triaging", "implementing", "accepting"}
+ACTIVE = {"transcribing", "triaging", "implementing", "resolving", "accepting"}
 # statuses where deleting the item is safe
 TERMINAL = {"triaged", "rejected", "done", "discarded", "failed", "captured"}
 

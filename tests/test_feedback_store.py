@@ -194,3 +194,41 @@ def test_stage_comment_transcribes_and_revises(monkeypatch):
     monkeypatch.setattr(runner, "_claude_revise", lambda m: revised)
     runner.stage_comment(fid)
     assert store.load(fid)["error"] is None
+
+
+def test_merge_probe(tmp_path, monkeypatch):
+    """Dry-run conflict detection against a scratch repo, plus head-pair cache."""
+    import subprocess
+    from dotaml_live.serving import feedback_runner as runner
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def git(*args):
+        subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+
+    git("init", "-b", "master")
+    git("config", "user.email", "t@example.com")
+    git("config", "user.name", "t")
+    (repo / "f.txt").write_text("base\n")
+    git("add", "-A")
+    git("commit", "-m", "base")
+    git("checkout", "-b", "feat")
+    (repo / "f.txt").write_text("feature side\n")
+    git("commit", "-am", "feature change")
+    git("checkout", "master")
+
+    monkeypatch.setattr(runner, "REPO", repo)
+    runner._PROBE_CACHE.clear()
+
+    assert runner.merge_probe("feat") == {"clean": True, "conflicts": []}
+    assert runner.merge_probe(None) is None
+    assert runner.merge_probe("no-such-branch") is None
+
+    # master moves onto the same lines → probe flips to conflict (cache must
+    # not serve the stale clean verdict)
+    (repo / "f.txt").write_text("master side\n")
+    git("commit", "-am", "master change")
+    probe = runner.merge_probe("feat")
+    assert probe["clean"] is False
+    assert probe["conflicts"] == ["f.txt"]

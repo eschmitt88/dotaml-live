@@ -5,12 +5,13 @@ sidecars; the heavy stages run in detached runner units (feedback_runner)."""
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, PlainTextResponse
 
 from .. import feedback_store as store
-from ..feedback_runner import cleanup_workspace, spawn_stage
+from ..feedback_runner import cleanup_workspace, merge_probe, spawn_stage
 from ..schemas import FeedbackRejectReq, FeedbackTextReq
 
 router = APIRouter(prefix="/api/feedback", tags=["feedback"])
@@ -59,7 +60,12 @@ async def feedback_audio(request: Request):
 @router.get("")
 def feedback_list():
     store.reconcile()
-    return {"items": store.list_items()}
+    items = store.list_items()
+    for it in items:
+        # would this branch still merge cleanly into master? (cached dry-run)
+        if it["status"] in ("implemented", "failed") and it.get("branch"):
+            it["merge_probe"] = merge_probe(it["branch"])
+    return {"items": items}
 
 
 @router.get("/{fid}/log")
@@ -141,6 +147,22 @@ def feedback_accept(fid: str):
         raise HTTPException(409, f"cannot accept from status {meta['status']}")
     spawn_stage("accept", fid)
     return meta
+
+
+@router.post("/{fid}/resolve")
+def feedback_resolve(fid: str):
+    """Fold current master into the ticket's branch, claude resolving conflicts
+    in the worktree (master is never touched). Cheaper than a full re-implement
+    when other accepted tickets made the branch stale."""
+    _control_only()
+    meta = _get(fid)
+    if meta["status"] not in ("implemented", "failed"):
+        raise HTTPException(409, f"cannot resolve from status {meta['status']}")
+    if not (meta.get("branch") and meta.get("worktree")
+            and Path(meta["worktree"]).is_dir()):
+        raise HTTPException(409, "no live worktree for this ticket — use retry instead")
+    spawn_stage("resolve", fid)
+    return store.update(fid, error=None)
 
 
 @router.post("/{fid}/discard")

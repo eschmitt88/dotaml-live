@@ -12,6 +12,8 @@ Stages (python -m dotaml_live.serving.feedback_runner <stage> <id>):
                text into a revised ticket — runs right after a comment is posted
     implement  git worktree + branch, claude implements the ticket, builds the
                SPA, starts a dev preview server on a free port (8091–8099)
+    resolve    fold current master into the ticket's branch (other tickets
+               merged first); claude resolves conflicts in the worktree only
     accept     stop preview, merge branch into master, rebuild main SPA,
                drop worktree+branch, restart the live dashboard service
 
@@ -120,6 +122,41 @@ def cleanup_workspace(fid: str) -> None:
         subprocess.run(["git", "branch", "-D", meta["branch"]],
                        cwd=str(REPO), capture_output=True, timeout=30)
     store.update(fid, dev=None)
+
+
+# ---------------------------------------------------------------- merge probe
+
+_PROBE_CACHE: dict[str, tuple[tuple[str, ...], dict]] = {}
+
+
+def merge_probe(branch: str | None) -> dict | None:
+    """Dry-run 'would this branch merge cleanly into master right now?' via
+    `git merge-tree --write-tree` (no working-tree changes). Cached on the
+    (master, branch) head pair — the list API calls this on every poll.
+
+    Returns {"clean": bool, "conflicts": [paths]} or None if the branch is gone.
+    """
+    if not branch:
+        return None
+    heads = subprocess.run(["git", "rev-parse", "master", branch], cwd=str(REPO),
+                           capture_output=True, text=True, timeout=15)
+    if heads.returncode != 0:
+        return None
+    key = tuple(heads.stdout.split())
+    cached = _PROBE_CACHE.get(branch)
+    if cached and cached[0] == key:
+        return cached[1]
+    r = subprocess.run(["git", "merge-tree", "--write-tree", "--name-only",
+                        "master", branch],
+                       cwd=str(REPO), capture_output=True, text=True, timeout=30)
+    files: list[str] = []
+    for line in r.stdout.splitlines()[1:]:     # line 0 is the result tree oid
+        if not line.strip():
+            break                               # blank line ends the file list
+        files.append(line.strip())
+    res = {"clean": r.returncode == 0, "conflicts": sorted(set(files))}
+    _PROBE_CACHE[branch] = (key, res)
+    return res
 
 
 # ---------------------------------------------------------------- claude calls
@@ -313,16 +350,10 @@ def _fmt_stream_line(line: str) -> list[str]:
     return out
 
 
-def _claude_implement(meta: dict, wt: Path, log_file: Path,
-                      worktree_state: str = "") -> dict:
+def _claude_code_pass(prompt: str, wt: Path, log_file: Path, header: str) -> dict:
+    """Run a permissions-skipped claude coding pass inside the worktree,
+    streaming a readable log. Returns {started, finished, cost_usd}."""
     fb = _cfg()
-    t = meta["ticket"]
-    prompt = IMPLEMENT_PROMPT.format(
-        branch=meta["branch"], fid=meta["id"], title=t["title"], summary=t["summary"],
-        details=t["details"], area=t["area"],
-        acceptance="\n".join(f"- {a}" for a in t["acceptance"]) or "- (none given)",
-        raw=meta.get("raw_text") or "", comments_section=_comments_section(meta),
-        worktree_state=worktree_state, repo=REPO, wt=wt, python=sys.executable)
     cmd = [_claude_bin(), "-p", prompt, "--dangerously-skip-permissions",
            "--output-format", "stream-json", "--verbose"]
     if fb.get("implement_model"):
@@ -332,14 +363,14 @@ def _claude_implement(meta: dict, wt: Path, log_file: Path,
     info = {"started": _now_iso(), "cost_usd": None}
     deadline = time.monotonic() + timeout
     with open(log_file, "a") as lf:
-        lf.write(f"=== implement run {_now_iso()} (branch {meta['branch']}) ===\n")
+        lf.write(f"=== {header} ===\n")
         lf.flush()
         proc = subprocess.Popen(cmd, cwd=str(wt), text=True, env=_runner_env(),
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         for line in proc.stdout:
             if time.monotonic() > deadline:
                 proc.kill()
-                raise RuntimeError(f"implementation timed out after {timeout / 60:.0f} min")
+                raise RuntimeError(f"claude pass timed out after {timeout / 60:.0f} min")
             try:
                 ev = json.loads(line)
                 if ev.get("type") == "result":
@@ -351,9 +382,22 @@ def _claude_implement(meta: dict, wt: Path, log_file: Path,
             lf.flush()
         rc = proc.wait(timeout=60)
     if rc != 0:
-        raise RuntimeError(f"claude implement exited {rc} — see log")
+        raise RuntimeError(f"claude pass exited {rc} — see log")
     info["finished"] = _now_iso()
     return info
+
+
+def _claude_implement(meta: dict, wt: Path, log_file: Path,
+                      worktree_state: str = "") -> dict:
+    t = meta["ticket"]
+    prompt = IMPLEMENT_PROMPT.format(
+        branch=meta["branch"], fid=meta["id"], title=t["title"], summary=t["summary"],
+        details=t["details"], area=t["area"],
+        acceptance="\n".join(f"- {a}" for a in t["acceptance"]) or "- (none given)",
+        raw=meta.get("raw_text") or "", comments_section=_comments_section(meta),
+        worktree_state=worktree_state, repo=REPO, wt=wt, python=sys.executable)
+    return _claude_code_pass(prompt, wt, log_file,
+                             f"implement run {_now_iso()} (branch {meta['branch']})")
 
 
 # ---------------------------------------------------------------- stages
@@ -540,6 +584,106 @@ def stage_implement(fid: str) -> None:
     store.set_status(fid, "implemented")
 
 
+RESOLVE_PROMPT = """\
+You are resolving a git merge conflict inside a dedicated worktree (your
+current directory) on branch {branch} of the dotaml-live repo. The branch
+implements the approved ticket below; master has moved on since it was cut
+(other accepted tickets merged). A `git merge master` has been started here
+and stopped on conflicts — finish it.
+
+TICKET {fid}: {title}
+summary: {summary}
+
+CONFLICTED FILES:
+{files}
+
+RULES
+- Resolve every conflict so BOTH intents survive: master's changes AND this
+  branch's feature. Read enough surrounding code to merge semantically, not
+  just textually — if both sides changed the same component, integrate them.
+- Modify files ONLY inside this worktree. Never touch the main checkout at
+  {repo}.
+- If Python is involved, run: PYTHONPATH={wt}/src {python} -m pytest tests/ -q
+- If anything under frontend/ changed, rebuild it:
+  cd frontend && npm run build   (node_modules is pre-seeded; must succeed)
+- Conclude the merge: git add -A && git commit --no-edit
+- Append a short '## Merge resolution' section to .feedback-summary.md (do
+  NOT commit it): which conflicts you hit and how you resolved them.
+"""
+
+
+def stage_resolve(fid: str) -> None:
+    """Fold current master into the ticket's branch, letting claude resolve
+    conflicts in the worktree. Master is never touched — a bad resolution can
+    only break the branch, which the user re-tests on the preview. After this
+    the accept merge is a clean fast-forward-style merge."""
+    meta = store.load(fid)
+    if meta["status"] not in ("implemented", "failed", "resolving"):
+        raise RuntimeError(f"cannot resolve from status {meta['status']}")
+    wt = Path(meta.get("worktree") or "")
+    if not (meta.get("branch") and wt.is_dir()):
+        raise RuntimeError("no live worktree/branch to resolve — use retry instead")
+    store.update(fid, runner_pid=os.getpid())
+    store.set_status(fid, "resolving")
+    prev_port = (meta.get("dev") or {}).get("port")
+    log_file = store.log_path(fid)
+
+    merge = subprocess.run(["git", "merge", "--no-ff", "master", "-m",
+                            f"merge master into {meta['branch']} (conflict resolution)"],
+                           cwd=str(wt), capture_output=True, text=True, timeout=120)
+    info = {"resolve_cost_usd": None}
+    if merge.returncode == 0:
+        with open(log_file, "a") as lf:
+            lf.write(f"=== resolve {_now_iso()}: master merged cleanly, "
+                     "no claude pass needed ===\n")
+    else:
+        files = subprocess.run(["git", "diff", "--name-only", "--diff-filter=U"],
+                               cwd=str(wt), capture_output=True, text=True,
+                               timeout=30).stdout.strip()
+        if not files:
+            subprocess.run(["git", "merge", "--abort"], cwd=str(wt),
+                           capture_output=True, timeout=60)
+            raise RuntimeError(f"merge of master failed without conflict markers:\n"
+                               f"{(merge.stdout + merge.stderr)[:500]}")
+        t = meta.get("ticket") or {}
+        prompt = RESOLVE_PROMPT.format(
+            branch=meta["branch"], fid=fid, title=t.get("title", "?"),
+            summary=t.get("summary", ""), files=files,
+            repo=REPO, wt=wt, python=sys.executable)
+        pass_info = _claude_code_pass(
+            prompt, wt, log_file,
+            f"resolve run {_now_iso()} (merging master into {meta['branch']})")
+        info["resolve_cost_usd"] = pass_info.get("cost_usd")
+
+        unmerged = subprocess.run(["git", "ls-files", "-u"], cwd=str(wt),
+                                  capture_output=True, text=True, timeout=30).stdout
+        mid_merge = subprocess.run(["git", "rev-parse", "-q", "--verify", "MERGE_HEAD"],
+                                   cwd=str(wt), capture_output=True, timeout=30)
+        if unmerged.strip() or mid_merge.returncode == 0:
+            subprocess.run(["git", "merge", "--abort"], cwd=str(wt),
+                           capture_output=True, timeout=60)
+            raise RuntimeError("claude did not conclude the merge — aborted, "
+                               "branch unchanged; see log")
+
+    # the merge may have pulled in frontend changes — rebuild unconditionally
+    with open(log_file, "a") as lf:
+        lf.write("— rebuilding SPA after merge\n")
+        lf.flush()
+        subprocess.run(["npm", "run", "build"], cwd=str(wt / "frontend"), check=True,
+                       stdout=lf, stderr=subprocess.STDOUT, timeout=600,
+                       env=_runner_env())
+
+    stop_dev_server(meta)
+    meta = store.update(fid, dev=None)          # free our own port for re-pick
+    summary_p = wt / ".feedback-summary.md"
+    impl = {**(meta.get("impl") or {}), **info, "resolved": _now_iso(),
+            "summary": summary_p.read_text().strip() if summary_p.exists()
+            else (meta.get("impl") or {}).get("summary")}
+    dev = _start_dev_server(fid, wt, prefer_port=prev_port)
+    store.update(fid, impl=impl, dev=dev)
+    store.set_status(fid, "implemented")
+
+
 def stage_accept(fid: str) -> None:
     meta = store.load(fid)
     if meta["status"] not in ("implemented", "accepting"):
@@ -555,7 +699,9 @@ def stage_accept(fid: str) -> None:
     if merge.returncode != 0:
         subprocess.run(["git", "merge", "--abort"], cwd=str(REPO),
                        capture_output=True, timeout=60)
-        raise RuntimeError(f"merge failed:\n{merge.stdout}\n{merge.stderr}")
+        raise RuntimeError("merge into master failed — use 'Resolve with Claude' "
+                           f"to fold master into the branch, then accept:\n"
+                           f"{merge.stdout}\n{merge.stderr}")
 
     with open(store.log_path(fid), "a") as lf:
         lf.write(f"=== accept {_now_iso()}: merged {meta['branch']}, rebuilding SPA ===\n")
@@ -577,7 +723,8 @@ def stage_accept(fid: str) -> None:
 
 
 STAGES = {"intake": stage_intake, "comment": stage_comment,
-          "implement": stage_implement, "accept": stage_accept}
+          "implement": stage_implement, "resolve": stage_resolve,
+          "accept": stage_accept}
 
 
 def main() -> None:

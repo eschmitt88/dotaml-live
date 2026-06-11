@@ -852,10 +852,11 @@ const FB_CHIP = {
   captured: ['queued', 'wait'], transcribing: ['transcribing…', 'wait'],
   triaging: ['writing ticket…', 'wait'], triaged: ['awaiting approval', 'todo'],
   implementing: ['implementing…', 'wait'], implemented: ['ready to test', 'ok'],
+  resolving: ['resolving conflicts…', 'wait'],
   accepting: ['deploying…', 'wait'], done: ['done', 'done'],
   failed: ['failed', 'bad'], rejected: ['rejected', 'off'], discarded: ['discarded', 'off'],
 }
-const FB_BUSY = ['captured', 'transcribing', 'triaging', 'implementing', 'accepting']
+const FB_BUSY = ['captured', 'transcribing', 'triaging', 'implementing', 'resolving', 'accepting']
 
 function FeedbackComposer({ onSubmitted, recorder }) {
   const [text, setText] = useState('')
@@ -1000,6 +1001,7 @@ function FeedbackItem({ item, onChanged, onErr, preview }) {
   const canComment = ['implemented', 'triaged'].includes(item.status)
   const devUrl = item.status === 'implemented' && item.dev
     ? `http://${window.location.hostname}:${item.dev.port}/` : null
+  const conflicted = item.merge_probe && !item.merge_probe.clean
 
   const act = async (action, fn) => {
     setActing(true)
@@ -1032,7 +1034,15 @@ function FeedbackItem({ item, onChanged, onErr, preview }) {
           </>}
           {devUrl && <>
             <a className="fb-preview" href={devUrl} target="_blank" rel="noreferrer">⧉ Open dev preview :{item.dev.port}</a>
-            <button disabled={acting} onClick={() => act('accept')}>✓ Accept & deploy</button>
+            {conflicted && <>
+              <span className="fb-conflict" title={`other accepted tickets changed: ${item.merge_probe.conflicts.join(', ')}`}>
+                ⚠ conflicts with master ({item.merge_probe.conflicts.length})</span>
+              <button disabled={acting} onClick={() => act('resolve')}
+                title="Claude merges current master into this ticket's branch and resolves the conflicts there — master is untouched. Re-runs tests, rebuilds, restarts the preview for you to re-test. Much cheaper than re-implementing.">
+                🤝 Resolve with Claude</button>
+            </>}
+            <button disabled={acting || conflicted} onClick={() => act('accept')}
+              title={conflicted ? 'Resolve the conflicts with master first' : undefined}>✓ Accept & deploy</button>
             {item.comments?.length > 0 &&
               <button className="ghost" disabled={acting} onClick={() => act('retry')}
                 title="Re-runs the coding pass on this ticket with all comments folded in (voice comments are transcribed first). Replaces this preview build.">
@@ -1040,6 +1050,10 @@ function FeedbackItem({ item, onChanged, onErr, preview }) {
             <button className="ghost danger" disabled={acting} onClick={() => act('discard')}>Discard</button>
           </>}
           {item.status === 'failed' && <>
+            {conflicted && item.worktree &&
+              <button disabled={acting} onClick={() => act('resolve')}
+                title="Claude merges current master into this ticket's branch and resolves the conflicts there — master is untouched. Keeps the existing implementation instead of redoing it.">
+                🤝 Resolve conflicts with Claude</button>}
             <button disabled={acting} onClick={() => act('retry')}
               title={item.ticket
                 ? 'The ticket already exists, so this re-runs only the implementation: fresh coding pass on the ticket + all comments (voice comments transcribed first). Triage is not redone.'
@@ -1054,7 +1068,7 @@ function FeedbackItem({ item, onChanged, onErr, preview }) {
         {canComment &&
           <button className="ghost" onClick={() => setComposing((s) => !s)}>
             {composing ? 'hide comment' : '💬 comment'}</button>}
-        {(item.status === 'implementing' || item.status === 'accepting' || item.impl) &&
+        {(item.status === 'implementing' || item.status === 'resolving' || item.status === 'accepting' || item.impl) &&
           <button className="ghost" onClick={() => setShowLog((s) => !s)}>
             {showLog ? 'hide log' : 'show log'}</button>}
       </div>
