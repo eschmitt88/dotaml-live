@@ -2,6 +2,35 @@
 
 Did / Findings / Next, appended per session (mirrors the research-repo discipline).
 
+## 2026-06-11 — merge-conflict probe + claude resolve stage (`07e43aa`)
+
+### Did
+- **Conflict probe**: `GET /api/feedback` now attaches `merge_probe`
+  (`git merge-tree --write-tree` dry-run, cached on the (master, branch) head
+  pair) to implemented/failed items. UI shows "⚠ conflicts with master (N)"
+  with the file list, and disables Accept while conflicted.
+- **`resolve` stage + "🤝 Resolve with Claude" button**: merges current master
+  *into* the ticket's branch in its worktree; claude resolves the markers
+  there (runs pytest, rebuilds the SPA), the preview restarts, item returns to
+  "ready to test". Master is never touched — abort on an unconcluded merge
+  leaves the branch as it was. New `resolving` status (ACTIVE/reconciled).
+  Accept's conflict failure message now points at the resolve action.
+- Refactored the streaming claude invocation out of `_claude_implement` into
+  `_claude_code_pass` (shared by implement + resolve). +1 probe unit test
+  against a scratch git repo (43 pass).
+
+### Findings
+- Rationale (user asked "why not let claude resolve instead of redoing the
+  ticket?"): resolution is ~5-20× cheaper than a re-implement and keeps the
+  already-tested code; the risk (semantically-wrong textual merge) is bounded
+  because resolution happens on the branch only, re-runs tests + build, and
+  lands back on the preview for human re-test before accept.
+
+### Next
+- A ticket was mid-`implementing` when this landed; its branch predates
+  `07e43aa` and may be the first real conflict the probe flags — resolve it
+  from the UI as the live test.
+
 ## 2026-06-11 — fix: detached runners now run the spawning process's code
 
 ### Did
