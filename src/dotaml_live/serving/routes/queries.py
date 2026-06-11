@@ -188,9 +188,17 @@ def patch_status():
 
 @router.get("/combos-table")
 def combos_table(request: Request):
-    """Precomputed all-pairs discovery table (synergy + kills/min). Draft-independent;
-    served as a static table the SPA sorts/filters client-side."""
+    """Precomputed all-pairs discovery table (synergy + kills/min + win rate).
+    Draft-independent; served as a static table the SPA sorts/filters client-side."""
     from ...queries import artifacts
     from ...common import paths
     request.app.state.model.maybe_reload()
-    return artifacts.load_combos_table(str(paths.live_model_dir()))
+    table = artifacts.load_combos_table(str(paths.live_model_dir()))
+    rows = table.get("combos") or []
+    if table.get("computed") and rows and "avg_winprob" not in rows[0]:
+        # table predates avg_winprob — recalculate win rates with the live model
+        from ...queries import combos_precompute
+        combos_precompute.backfill_avg_winprob(paths.live_model_dir(),
+                                               f=request.app.state.model.f)
+        table = artifacts.load_combos_table(str(paths.live_model_dir()))
+    return table

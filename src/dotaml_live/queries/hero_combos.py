@@ -46,30 +46,37 @@ class HeroCombo:
     hero_names: tuple[str, ...]
     score: float                       # synergy lift, or kills/min, per `mode`
     # synergy-mode breakdown (None in kills mode):
-    joint_winprob: float | None = None
+    joint_winprob: float | None = None      # P(win | combo on radiant)
     independent_baseline: float | None = None
     # kills-mode breakdown (None in synergy mode):
     kills_per_min: float | None = None
+    # absolute win rate, averaged over the combo placed on radiant vs on dire:
+    avg_winprob: float | None = None
 
 
-def _radiant_subset_row(subset: tuple[int, ...]) -> tuple[list[int], list[bool]]:
-    """One row: place `subset` (1-5 heroes) on radiant unmasked, everything else
+def _subset_row(subset: tuple[int, ...], side: str = "radiant") -> tuple[list[int], list[bool]]:
+    """One row: place `subset` (1-5 heroes) on `side` unmasked, everything else
     masked. Canonical sort by (is_masked, hero_id) to match v7 training order."""
     n = len(subset)
-    radiant_5 = list(subset) + [0] * (5 - n)
-    radiant_mask = [False] * n + [True] * (5 - n)
-    dire_5 = [0] * 5
-    dire_mask = [True] * 5
-    r_arg = sorted(range(5), key=lambda i: (radiant_mask[i], radiant_5[i]))
-    d_arg = sorted(range(5), key=lambda i: (dire_mask[i], dire_5[i]))
-    hero_ids = [radiant_5[i] for i in r_arg] + [dire_5[i] for i in d_arg]
-    hero_mask = [radiant_mask[i] for i in r_arg] + [dire_mask[i] for i in d_arg]
-    return hero_ids, hero_mask
+    team_5 = list(subset) + [0] * (5 - n)
+    team_mask = [False] * n + [True] * (5 - n)
+    other_5 = [0] * 5
+    other_mask = [True] * 5
+    t_arg = sorted(range(5), key=lambda i: (team_mask[i], team_5[i]))
+    o_arg = sorted(range(5), key=lambda i: (other_mask[i], other_5[i]))
+    team_ids = [team_5[i] for i in t_arg]
+    team_m = [team_mask[i] for i in t_arg]
+    other_ids = [other_5[i] for i in o_arg]
+    other_m = [other_mask[i] for i in o_arg]
+    if side == "radiant":
+        return team_ids + other_ids, team_m + other_m
+    return other_ids + team_ids, other_m + team_m
 
 
 @torch.no_grad()
-def _radiant_winprob_batch(f: V7Foundation, subsets: list[tuple[int, ...]]) -> np.ndarray:
-    """P(radiant_win) for each subset placed (masked) on radiant. Chunked."""
+def _radiant_winprob_batch(f: V7Foundation, subsets: list[tuple[int, ...]],
+                           side: str = "radiant") -> np.ndarray:
+    """P(radiant_win) for each subset placed (masked) on `side`. Chunked."""
     out = np.empty(len(subsets), dtype=np.float64)
     for start in range(0, len(subsets), _CHUNK):
         chunk = subsets[start:start + _CHUNK]
@@ -77,7 +84,7 @@ def _radiant_winprob_batch(f: V7Foundation, subsets: list[tuple[int, ...]]) -> n
         hero_ids_np = np.zeros((N, 10), dtype=np.int64)
         hero_mask_np = np.zeros((N, 10), dtype=bool)
         for i, sub in enumerate(chunk):
-            hids, hmask = _radiant_subset_row(sub)
+            hids, hmask = _subset_row(sub, side)
             hero_ids_np[i] = hids
             hero_mask_np[i] = hmask
         inputs = f.empty_inputs(batch_size=N)
@@ -87,6 +94,14 @@ def _radiant_winprob_batch(f: V7Foundation, subsets: list[tuple[int, ...]]) -> n
         winp = f.predict(inputs=inputs, masks=masks).win_prob().cpu().numpy()
         out[start:start + N] = winp
     return out
+
+
+def _avg_winprob_batch(f: V7Foundation, subsets: list[tuple[int, ...]]) -> np.ndarray:
+    """Side-averaged P(win) per subset: mean of P(win | subset on radiant) and
+    P(win | subset on dire) = 1 - P(radiant_win | subset on dire)."""
+    rad = _radiant_winprob_batch(f, subsets)
+    dire = 1.0 - _radiant_winprob_batch(f, subsets, side="dire")
+    return (rad + dire) / 2.0
 
 
 def _default_pool(size: int, pool: list[int] | None) -> list[int]:
@@ -113,8 +128,13 @@ def hero_combos(f: V7Foundation,
     cand = _default_pool(size, pool)
 
     if mode == "synergy":
-        return _synergy_combos(f, cand, size, top_k)
-    return _kills_combos(f, cand, size, top_k)
+        out = _synergy_combos(f, cand, size, top_k)
+    else:
+        out = _kills_combos(f, cand, size, top_k)
+    avg = _avg_winprob_batch(f, [c.heroes for c in out])
+    for c, a in zip(out, avg):
+        c.avg_winprob = float(a)
+    return out
 
 
 def _synergy_combos(f: V7Foundation, cand: list[int], size: int, top_k: int) -> list[HeroCombo]:

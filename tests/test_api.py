@@ -74,6 +74,8 @@ def test_hero_combos_modes(client, draft):
     syn = client.post("/api/hero-combos",
                       json={"pool": draft, "size": 2, "mode": "synergy", "top_k": 5}).json()
     assert syn["combos"] and all(c["joint_winprob"] is not None for c in syn["combos"])
+    assert all(0.0 <= c["avg_winprob"] <= 1.0 for c in syn["combos"])
     kpm = client.post("/api/hero-combos",
                       json={"pool": draft, "size": 2, "mode": "kills_per_min", "top_k": 3}).json()
     assert kpm["combos"] and all(c["kills_per_min"] is not None for c in kpm["combos"])
+    assert all(0.0 <= c["avg_winprob"] <= 1.0 for c in kpm["combos"])

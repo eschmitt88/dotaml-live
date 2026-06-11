@@ -36,7 +36,15 @@ def _base_and_lift(f, heroes):
 
 def _synergy_scores(f, subsets, base, lift):
     joint = _radiant_winprob_batch(f, subsets)
-    return np.array([joint[k] - base - sum(lift[h] for h in s) for k, s in enumerate(subsets)])
+    syn = np.array([joint[k] - base - sum(lift[h] for h in s) for k, s in enumerate(subsets)])
+    return syn, joint
+
+
+def _avg_winprob(f, subsets, joint_radiant):
+    """Side-averaged win rate: mean of P(win | combo on radiant) (already computed
+    for synergy) and P(win | combo on dire) = 1 - P(radiant_win | combo on dire)."""
+    dire = 1.0 - _radiant_winprob_batch(f, subsets, side="dire")
+    return (np.asarray(joint_radiant) + dire) / 2.0
 
 
 @torch.no_grad()
@@ -70,10 +78,11 @@ def _kpm_subsets(f, subsets, n_samples, seed=42):
     return kpm.reshape(len(subsets), n_samples).mean(axis=1)
 
 
-def _rows(subsets, syn, kpm, names, attr):
+def _rows(subsets, syn, kpm, avg, names, attr):
     return [{"ids": list(s), "names": [names[h] for h in s],
              "attrs": [attr.get(h, "?") for h in s],
-             "synergy": round(float(syn[k]), 4), "kpm": round(float(kpm[k]), 3)}
+             "synergy": round(float(syn[k]), 4), "kpm": round(float(kpm[k]), 3),
+             "avg_winprob": round(float(avg[k]), 4)}
             for k, s in enumerate(subsets)]
 
 
@@ -98,21 +107,46 @@ def build_table(model_dir: str | Path, pair_samples: int = 6, trio_samples: int 
     base, lift = _base_and_lift(f, heroes)
 
     pairs = list(itertools.combinations(heroes, 2))
-    syn_p = _synergy_scores(f, pairs, base, lift)
+    syn_p, joint_p = _synergy_scores(f, pairs, base, lift)
+    avg_p = _avg_winprob(f, pairs, joint_p)
     kpm_p = _kpm_subsets(f, pairs, pair_samples)
 
     trios = list(itertools.combinations(heroes, 3))
-    syn_t_all = _synergy_scores(f, trios, base, lift)
+    syn_t_all, joint_t_all = _synergy_scores(f, trios, base, lift)
     keep = _select_trios(trios, syn_t_all)
     trios_k = [trios[i] for i in keep]
     syn_t, kpm_t = syn_t_all[keep], _kpm_subsets(f, trios_k, trio_samples)
+    avg_t = _avg_winprob(f, trios_k, joint_t_all[keep])
 
     out = {"computed": True, "version": model_dir.name, "n_heroes": len(heroes),
            "n_pairs": len(pairs), "n_trios_scored": len(trios), "n_trios_kept": len(trios_k),
-           "combos": _rows(pairs, syn_p, kpm_p, names, attr),
-           "trios": _rows(trios_k, syn_t, kpm_t, names, attr)}
+           "combos": _rows(pairs, syn_p, kpm_p, avg_p, names, attr),
+           "trios": _rows(trios_k, syn_t, kpm_t, avg_t, names, attr)}
     dest = paths.combos_table_json(model_dir)
     dest.write_text(json.dumps(out))
+    from . import artifacts
+    artifacts.load_combos_table.cache_clear()
+    return dest
+
+
+def backfill_avg_winprob(model_dir: str | Path, f: V7Foundation | None = None) -> Path:
+    """Add avg_winprob to a hero_combos.json built before the field existed.
+    Recalculates win rates with the model (two winprob passes per row set) but
+    skips the expensive kpm resampling — much cheaper than a full build_table."""
+    model_dir = Path(model_dir)
+    dest = paths.combos_table_json(model_dir)
+    table = json.loads(dest.read_text())
+    if f is None:
+        f = V7Foundation(model_dir=model_dir)
+    for key in ("combos", "trios"):
+        rows = table.get(key) or []
+        if not rows:
+            continue
+        subsets = [tuple(r["ids"]) for r in rows]
+        avg = _avg_winprob(f, subsets, _radiant_winprob_batch(f, subsets))
+        for r, a in zip(rows, avg):
+            r["avg_winprob"] = round(float(a), 4)
+    dest.write_text(json.dumps(table))
     from . import artifacts
     artifacts.load_combos_table.cache_clear()
     return dest
