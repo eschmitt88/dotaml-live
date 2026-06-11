@@ -588,7 +588,7 @@ function AttrTag({ a }) {
   return <span className="attr" style={{ background: ATTR_COLOR[a] || '#888' }}>{a}</span>
 }
 
-// per-metric range filters: [key, label, formatter] — "energy" in the feedback is the synergy score
+// per-metric minimum filters: [key, label, formatter] — "energy" in the feedback is the synergy score
 const METRIC_FILTERS = [
   ['avg_winprob', 'Win rate', (v) => (v * 100).toFixed(1) + '%'],
   ['synergy', 'Synergy', (v) => (v >= 0 ? '+' : '') + (v * 100).toFixed(2) + '%'],
@@ -596,24 +596,19 @@ const METRIC_FILTERS = [
   ['fun', 'Fun', (v) => v.toFixed(2)],
 ]
 
-function RangeSlider({ label, min, max, value, format, disabled, onChange }) {
-  const [lo, hi] = value
+function MinSlider({ label, min, max, value, format, disabled, onChange }) {
   const step = (max - min) / 200 || 0.001
-  const pct = (v) => (max > min ? ((v - min) / (max - min)) * 100 : 0)
+  const pct = max > min ? ((value - min) / (max - min)) * 100 : 0
   return (
     <div className={`rslider ${disabled ? 'off' : ''}`}>
       <div className="rs-head">
         <span>{label}</span>
-        <span className="rs-vals">{format(lo)} – {format(hi)}</span>
+        <span className="rs-vals">≥ {format(value)}</span>
       </div>
       <div className="rs-track">
-        <div className="rs-fill" style={{ left: `${pct(lo)}%`, width: `${pct(hi) - pct(lo)}%` }} />
-        <input type="range" min={min} max={max} step={step} value={lo} disabled={disabled}
-          style={{ zIndex: lo > (min + max) / 2 ? 4 : 2 }}
-          onChange={(e) => onChange([Math.min(Number(e.target.value), hi), hi])} />
-        <input type="range" min={min} max={max} step={step} value={hi} disabled={disabled}
-          style={{ zIndex: 3 }}
-          onChange={(e) => onChange([lo, Math.max(Number(e.target.value), lo)])} />
+        <div className="rs-fill" style={{ left: `${pct}%`, width: `${100 - pct}%` }} />
+        <input type="range" min={min} max={max} step={step} value={value} disabled={disabled}
+          onChange={(e) => onChange(Number(e.target.value))} />
       </div>
     </div>
   )
@@ -626,8 +621,7 @@ function DiscoverTab({ onAdd }) {
   const [size, setSize] = useState('pairs')      // 'pairs' | 'trios'
   const [sortKey, setSortKey] = useState('fun')
   const [limit, setLimit] = useState(150)
-  const [showFilters, setShowFilters] = useState(false)
-  const [ranges, setRanges] = useState({})        // metric key -> [lo, hi]; absent = full range
+  const [mins, setMins] = useState({})            // metric key -> min value; absent = no filter
   const [explain, setExplain] = useState(null)    // {names, loading, text?, error?} -> modal
 
   const explainCombo = (c) => {
@@ -643,8 +637,8 @@ function DiscoverTab({ onAdd }) {
   }
 
   useEffect(() => { api.combosTable().then(setData).catch((e) => setErr(String(e))) }, [])
-  useEffect(() => { setLimit(150) }, [size, q, sortKey, ranges])
-  useEffect(() => { setRanges({}) }, [size])
+  useEffect(() => { setLimit(150) }, [size, q, sortKey, mins])
+  useEffect(() => { setMins({}) }, [size])
 
   const base = data ? (size === 'pairs' ? data.combos : data.trios) || [] : []
   const rows = useMemo(() => {
@@ -665,24 +659,20 @@ function DiscoverTab({ onAdd }) {
     return b
   }, [rows])
 
-  // a slider at its full extent is a no-op, never a filter
-  const rangeActive = (k) => {
-    const rg = ranges[k]
-    return !!rg && (rg[0] > bounds[k][0] || rg[1] < bounds[k][1])
-  }
-  const nActive = METRIC_FILTERS.filter(([k]) => rangeActive(k)).length
+  // a slider at the data minimum is a no-op, never a filter
+  const minActive = (k) => mins[k] != null && mins[k] > bounds[k][0]
+  const nActive = METRIC_FILTERS.filter(([k]) => minActive(k)).length
 
   const view = useMemo(() => {
     const needle = q.trim().toLowerCase()
     let r = rows
     for (const [k] of METRIC_FILTERS) {
-      const rg = ranges[k]
-      if (!rg || (rg[0] <= bounds[k][0] && rg[1] >= bounds[k][1])) continue
-      r = r.filter((c) => c[k] != null && c[k] >= rg[0] && c[k] <= rg[1])
+      if (mins[k] == null || mins[k] <= bounds[k][0]) continue
+      r = r.filter((c) => c[k] != null && c[k] >= mins[k])
     }
     if (needle) r = r.filter((c) => c.names.some((n) => n.toLowerCase().includes(needle)))
     return [...r].sort((x, y) => y[sortKey] - x[sortKey])
-  }, [rows, q, sortKey, ranges, bounds])
+  }, [rows, q, sortKey, mins, bounds])
 
   if (err) return <p className="err">{err}</p>
   if (!data) return <p>Loading combos…</p>
@@ -717,22 +707,16 @@ function DiscoverTab({ onAdd }) {
             <button key={k} className={sortKey === k ? 'on' : ''} onClick={() => setSortKey(k)}>{label}</button>
           ))}
         </div>
-        <button className={`filter-btn ${showFilters || nActive ? 'on' : ''}`}
-          onClick={() => setShowFilters((s) => !s)}>
-          Filters{nActive ? ` (${nActive})` : ''} {showFilters ? '▴' : '▾'}
-        </button>
         <span className="count">showing {Math.min(limit, view.length)} of {view.length.toLocaleString()}</span>
       </div>
-      {showFilters && (
-        <div className="disco-filters">
-          {METRIC_FILTERS.map(([k, label, fmt]) => (
-            <RangeSlider key={k} label={label} min={bounds[k][0]} max={bounds[k][1]}
-              value={ranges[k] || bounds[k]} format={fmt} disabled={!rows.length}
-              onChange={(v) => setRanges((r) => ({ ...r, [k]: v }))} />
-          ))}
-          <button className="rs-reset" disabled={!nActive} onClick={() => setRanges({})}>Reset</button>
-        </div>
-      )}
+      <div className="disco-filters">
+        {METRIC_FILTERS.map(([k, label, fmt]) => (
+          <MinSlider key={k} label={label} min={bounds[k][0]} max={bounds[k][1]}
+            value={mins[k] != null ? mins[k] : bounds[k][0]} format={fmt} disabled={!rows.length}
+            onChange={(v) => setMins((m) => ({ ...m, [k]: v }))} />
+        ))}
+        <button className="rs-reset" disabled={!nActive} onClick={() => setMins({})}>Reset</button>
+      </div>
       <table className="combos">
         <thead>
           <tr>
