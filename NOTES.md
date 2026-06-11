@@ -35,10 +35,31 @@ Did / Findings / Next, appended per session (mirrors the research-repo disciplin
   re-run intake (transcribe + triage). It never re-does triage of an existing
   ticket.
 
+### Did (later same day)
+- **Diagnosed "TypeError: Failed to fetch" on preview re-implement**: with
+  runners now code-pinned, the preview's retry spawned the *worktree's*
+  `stage_implement`, which stops the preview server first (killing the
+  browser's in-flight fetch) and then dies trying `git worktree add` of its own
+  worktree inside itself (branch already checked out, exit 128). Control-plane
+  actions are self-defeating from a preview by construction.
+- **Fixed (`d9f79b5`)**: preview units run with `DOTAML_DEV_PREVIEW=1`;
+  approve/reject/accept/retry/discard/delete return 409 there; `/health`
+  exposes `dev_preview`; the preview's Feedback tab shows a banner + link to
+  :8090 instead of control buttons. Capture/comments/logs still work on
+  previews. Verified live: 409 on preview retry, preview survives, main
+  dashboard reports `dev_preview: false`.
+- Preview restarted on **:8092** (port drifted from 8091: master's
+  `stage_implement` doesn't clear the item's own `dev` before picking a port,
+  so it skips its old one; the open ticket's branch already fixes this with
+  `dev=None` — lands when accepted).
+
 ### Next
-- User: test the comment flow on the :8091 preview (record a comment → expect
-  transcript within ~30 s and ticket revisions shortly after), then Accept or
-  Discard from :8090.
+- User: test the comment flow on the **:8092** preview (record a comment →
+  transcript within ~30 s, ticket revisions shortly after), then from :8090
+  either "↻ Re-implement with comments" (the revised ticket has new
+  build-on-prior-tickets criteria the current build doesn't implement) or
+  Accept/Discard. Note the revised criteria mention `origin/master`, which
+  assumes a remote exists — review before approving.
 - The branch's `stage_comment` deliberately never flips status; if its runner
   dies, a voice comment can still show "transcribing…" with no reconcile —
   acceptable for now, revisit if it bites.
