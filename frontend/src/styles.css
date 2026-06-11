@@ -161,6 +161,21 @@ nav.tabs button.on { color:var(--fg); border-color:var(--line); border-bottom-co
 .disco-ctrl .seg button.on { background:var(--blue); color:#fff; border-color:var(--blue); }
 .search { flex:1; min-width:280px; }
 .count { color:var(--mut); font-size:12px; white-space:nowrap; }
+.filter-btn { background:#0c1116; border:1px solid var(--line); color:var(--mut); padding:6px 12px; }
+.filter-btn.on { color:var(--blue); border-color:var(--blue); }
+.disco-filters { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:12px 24px; align-items:end; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px 16px; margin-bottom:12px; }
+.rslider.off { opacity:.4; pointer-events:none; }
+.rs-head { display:flex; justify-content:space-between; gap:8px; font-size:12px; color:var(--mut); margin-bottom:4px; }
+.rs-vals { color:var(--fg); font-variant-numeric:tabular-nums; white-space:nowrap; }
+.rs-track { position:relative; height:18px; }
+.rs-track::before { content:''; position:absolute; top:7px; left:0; right:0; height:4px; background:#0c1116; border:1px solid var(--line); border-radius:3px; }
+.rs-fill { position:absolute; top:8px; height:4px; background:var(--blue); border-radius:3px; }
+.rs-track input[type=range] { position:absolute; inset:0; width:100%; margin:0; padding:0; background:none; border:0; -webkit-appearance:none; appearance:none; pointer-events:none; }
+.rs-track input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; pointer-events:auto; width:14px; height:14px; border-radius:50%; background:var(--fg); border:2px solid var(--blue); cursor:grab; }
+.rs-track input[type=range]::-moz-range-thumb { pointer-events:auto; width:10px; height:10px; border-radius:50%; background:var(--fg); border:2px solid var(--blue); cursor:grab; }
+.rs-reset { background:#0c1116; border:1px solid var(--line); color:var(--mut); justify-self:start; }
+.rs-reset:hover:not(:disabled) { color:var(--fg); border-color:var(--blue); }
+.rs-reset:disabled { opacity:.4; cursor:default; }
 table.combos { width:100%; border-collapse:collapse; font-size:13px; }
 table.combos th { text-align:left; color:var(--mut); font-weight:500; padding:6px 10px; border-bottom:1px solid var(--line); }
 table.combos th.sortable { cursor:pointer; user-select:none; }
