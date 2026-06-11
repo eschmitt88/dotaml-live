@@ -989,7 +989,7 @@ function FbCommentComposer({ id, onSubmitted }) {
   )
 }
 
-function FeedbackItem({ item, onChanged, onErr }) {
+function FeedbackItem({ item, onChanged, onErr, preview }) {
   const [open, setOpen] = useState(false)
   const [showLog, setShowLog] = useState(false)
   const [acting, setActing] = useState(false)
@@ -1022,30 +1022,35 @@ function FeedbackItem({ item, onChanged, onErr }) {
       {item.error && <p className="err fb-err">{item.error}</p>}
 
       <div className="fb-actions" onClick={(e) => e.stopPropagation()}>
-        {item.status === 'triaged' && <>
-          <button disabled={acting} onClick={() => act('approve')}>✓ Approve — implement it</button>
-          <button className="ghost" disabled={acting} onClick={() => act('reject')}>Reject</button>
+        {preview && ['triaged', 'implemented', 'failed'].includes(item.status) &&
+          <a className="muted" href={`http://${location.hostname}:8090/`}>
+            testing copy — approve / accept / re-implement from the main dashboard ⧉</a>}
+        {!preview && <>
+          {item.status === 'triaged' && <>
+            <button disabled={acting} onClick={() => act('approve')}>✓ Approve — implement it</button>
+            <button className="ghost" disabled={acting} onClick={() => act('reject')}>Reject</button>
+          </>}
+          {devUrl && <>
+            <a className="fb-preview" href={devUrl} target="_blank" rel="noreferrer">⧉ Open dev preview :{item.dev.port}</a>
+            <button disabled={acting} onClick={() => act('accept')}>✓ Accept & deploy</button>
+            {item.comments?.length > 0 &&
+              <button className="ghost" disabled={acting} onClick={() => act('retry')}
+                title="Re-runs the coding pass on this ticket with all comments folded in (voice comments are transcribed first). Replaces this preview build.">
+                ↻ Re-implement with comments</button>}
+            <button className="ghost danger" disabled={acting} onClick={() => act('discard')}>Discard</button>
+          </>}
+          {item.status === 'failed' && <>
+            <button disabled={acting} onClick={() => act('retry')}
+              title={item.ticket
+                ? 'The ticket already exists, so this re-runs only the implementation: fresh coding pass on the ticket + all comments (voice comments transcribed first). Triage is not redone.'
+                : 'No ticket yet, so this re-runs intake: transcribe the memo and triage it into a ticket.'}>
+              ↻ {item.ticket ? 'Retry implementation' : 'Retry transcription & triage'}</button>
+            <button className="ghost" disabled={acting} onClick={() => act('reject')}>Reject</button>
+          </>}
+          {['done', 'rejected', 'discarded'].includes(item.status) &&
+            <button className="ghost danger" disabled={acting}
+              onClick={() => act(null, () => api.deleteFeedback(item.id))}>✕ remove</button>}
         </>}
-        {devUrl && <>
-          <a className="fb-preview" href={devUrl} target="_blank" rel="noreferrer">⧉ Open dev preview :{item.dev.port}</a>
-          <button disabled={acting} onClick={() => act('accept')}>✓ Accept & deploy</button>
-          {item.comments?.length > 0 &&
-            <button className="ghost" disabled={acting} onClick={() => act('retry')}
-              title="Re-runs the coding pass on this ticket with all comments folded in (voice comments are transcribed first). Replaces this preview build.">
-              ↻ Re-implement with comments</button>}
-          <button className="ghost danger" disabled={acting} onClick={() => act('discard')}>Discard</button>
-        </>}
-        {item.status === 'failed' && <>
-          <button disabled={acting} onClick={() => act('retry')}
-            title={item.ticket
-              ? 'The ticket already exists, so this re-runs only the implementation: fresh coding pass on the ticket + all comments (voice comments transcribed first). Triage is not redone.'
-              : 'No ticket yet, so this re-runs intake: transcribe the memo and triage it into a ticket.'}>
-            ↻ {item.ticket ? 'Retry implementation' : 'Retry transcription & triage'}</button>
-          <button className="ghost" disabled={acting} onClick={() => act('reject')}>Reject</button>
-        </>}
-        {['done', 'rejected', 'discarded'].includes(item.status) &&
-          <button className="ghost danger" disabled={acting}
-            onClick={() => act(null, () => api.deleteFeedback(item.id))}>✕ remove</button>}
         {canComment &&
           <button className="ghost" onClick={() => setComposing((s) => !s)}>
             {composing ? 'hide comment' : '💬 comment'}</button>}
@@ -1101,10 +1106,12 @@ function FeedbackTab({ recorder }) {
   const [items, setItems] = useState(null)
   const [err, setErr] = useState(null)
   const [showArchive, setShowArchive] = useState(false)
+  const [preview, setPreview] = useState(false)
 
   const load = () => api.feedback().then((r) => { setItems(r.items); setErr(null) })
     .catch((e) => setErr(String(e)))
   useEffect(() => {
+    api.health().then((h) => setPreview(!!h.dev_preview)).catch(() => {})
     load()
     const t = setInterval(load, 4000)
     return () => clearInterval(t)
@@ -1131,13 +1138,16 @@ function FeedbackTab({ recorder }) {
             spins up an implementation on a branch with a dev preview to test, and accepting deploys it here.</p>
         </div>
       </div>
+      {preview && <p className="fb-previewbanner">⚠ Dev preview — test the change and leave
+        comments here; approve / accept / re-implement / discard happen on
+        the <a href={`http://${location.hostname}:8090/`}>main dashboard</a>.</p>}
       <FeedbackComposer onSubmitted={load} recorder={recorder} />
       {err && <p className="err">{err}</p>}
       {items.length === 0 && <p className="muted">Queue is empty — say what you wish this app did better.</p>}
       {groups.map(([name, list, cls]) => list.length > 0 && (
         <div key={name} className={`fb-group ${cls}`}>
           <h4>{name} <small>{list.length}</small></h4>
-          {list.map((i) => <FeedbackItem key={i.id} item={i} onChanged={load} onErr={setErr} />)}
+          {list.map((i) => <FeedbackItem key={i.id} item={i} onChanged={load} onErr={setErr} preview={preview} />)}
         </div>
       ))}
       {archive.length > 0 && (
@@ -1145,7 +1155,7 @@ function FeedbackTab({ recorder }) {
           <h4 className="fb-archtoggle" onClick={() => setShowArchive((s) => !s)}>
             {showArchive ? '▾' : '▸'} Archive <small>{archive.length}</small></h4>
           {showArchive && archive.map((i) =>
-            <FeedbackItem key={i.id} item={i} onChanged={load} onErr={setErr} />)}
+            <FeedbackItem key={i.id} item={i} onChanged={load} onErr={setErr} preview={preview} />)}
         </div>
       )}
     </section>

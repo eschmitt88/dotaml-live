@@ -4,6 +4,7 @@ v7 model. LAN-only; the SPA in frontend/ consumes this JSON API.
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 
@@ -43,7 +44,8 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     def health():
-        return {"status": "ok"}
+        return {"status": "ok",
+                "dev_preview": bool(os.environ.get("DOTAML_DEV_PREVIEW"))}
 
     @app.get("/model")
     def model():
