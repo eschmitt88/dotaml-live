@@ -2,6 +2,47 @@
 
 Did / Findings / Next, appended per session (mirrors the research-repo discipline).
 
+## 2026-06-11 — fix: detached runners now run the spawning process's code
+
+### Did
+- **Diagnosed the `failed / comment: 'comment'` + endless "transcribing…"** the
+  user hit while testing ticket `20260611-141018-87ade5b2` ("Transcribe and
+  revise ticket immediately on comment submit"): the dev preview's new
+  `/comment` endpoint spawns a runner stage named `comment`, but `spawn_stage`
+  launched the runner without PYTHONPATH, so it imported `dotaml_live` from the
+  **main checkout's editable install** where that stage doesn't exist →
+  `KeyError: 'comment'` → item marked failed, voice comment never transcribed.
+- **Fixed on master (`dcbf319`)**: `spawn_stage` now pins the transient unit to
+  the spawner's code + data (`PYTHONPATH=<src of running code>`, `DOTAML_DATA`,
+  `DOTAML_REGISTRY`); `_runner_env` strips PYTHONPATH so it can't leak into
+  claude's shell inside a different worktree; unknown stages fail with an
+  explicit version-mismatch message; Retry button now says what it re-runs
+  ("Retry implementation" vs "Retry transcription & triage") with tooltips.
+- Merged master into the ticket branch, rebuilt its SPA, restarted the :8091
+  preview and the main dashboard; reset the item to `implemented` (the
+  implementation itself never failed) and ran the branch's `comment` stage
+  manually to unstick the c2 transcript + ticket revision.
+
+### Findings
+- **Self-modification blind spot**: any feedback ticket that adds/changes a
+  *runner stage* was untestable from its own dev preview before this fix —
+  detached runners always executed master code. Now runners mirror their
+  spawner, so preview-spawned stages run the worktree's code against shared
+  data. (Preview-spawned `implement`/`accept` would operate on the worktree's
+  git tree — harmless but odd; approve/accept should still be clicked on :8090.)
+- Retry semantics (route `/retry`): ticket exists → re-run the coding pass
+  (comments folded in, pending voice comments transcribed first); no ticket →
+  re-run intake (transcribe + triage). It never re-does triage of an existing
+  ticket.
+
+### Next
+- User: test the comment flow on the :8091 preview (record a comment → expect
+  transcript within ~30 s and ticket revisions shortly after), then Accept or
+  Discard from :8090.
+- The branch's `stage_comment` deliberately never flips status; if its runner
+  dies, a voice comment can still show "transcribing…" with no reconcile —
+  acceptable for now, revisit if it bites.
+
 ## 2026-06-10 — self-improving feedback queue (voice → ticket → claude → dev preview)
 
 ### Did

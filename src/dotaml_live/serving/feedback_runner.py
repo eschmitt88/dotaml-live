@@ -452,6 +452,7 @@ def _start_dev_server(fid: str, wt: Path, prefer_port: int | None = None) -> dic
            f"--setenv=PYTHONPATH={wt}/src",
            f"--setenv=DOTAML_DATA={REPO}/data",
            f"--setenv=DOTAML_REGISTRY={REPO}/registry",
+           "--setenv=DOTAML_DEV_PREVIEW=1",
            sys.executable, "-c", boot]
     subprocess.run(cmd, check=True, capture_output=True, timeout=15)
     deadline = time.monotonic() + 180          # model load can take a while

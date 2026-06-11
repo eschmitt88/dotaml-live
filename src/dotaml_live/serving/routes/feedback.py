@@ -4,6 +4,8 @@ sidecars; the heavy stages run in detached runner units (feedback_runner)."""
 
 from __future__ import annotations
 
+import os
+
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, PlainTextResponse
 
@@ -19,6 +21,16 @@ def _get(fid: str) -> dict:
         return store.load(fid)
     except (KeyError, ValueError):
         raise HTTPException(404, f"unknown feedback item {fid}")
+
+
+def _control_only() -> None:
+    """Approve/reject/accept/retry/discard mutate the main checkout's workspace;
+    a dev preview spawning them would tear down the very worktree it serves
+    from. Previews are for capturing feedback and testing — curation happens on
+    the main dashboard."""
+    if os.environ.get("DOTAML_DEV_PREVIEW"):
+        raise HTTPException(409, "this is a dev preview — approve / accept / "
+                                 "retry / discard from the main dashboard (:8090)")
 
 
 @router.post("/text")
@@ -103,6 +115,7 @@ def feedback_comment_audio(fid: str, idx: int):
 
 @router.post("/{fid}/approve")
 def feedback_approve(fid: str):
+    _control_only()
     meta = _get(fid)
     if meta["status"] != "triaged":
         raise HTTPException(409, f"cannot approve from status {meta['status']}")
@@ -112,6 +125,7 @@ def feedback_approve(fid: str):
 
 @router.post("/{fid}/reject")
 def feedback_reject(fid: str, req: FeedbackRejectReq | None = None):
+    _control_only()
     meta = _get(fid)
     if meta["status"] not in ("triaged", "failed", "captured"):
         raise HTTPException(409, f"cannot reject from status {meta['status']}")
@@ -121,6 +135,7 @@ def feedback_reject(fid: str, req: FeedbackRejectReq | None = None):
 
 @router.post("/{fid}/accept")
 def feedback_accept(fid: str):
+    _control_only()
     meta = _get(fid)
     if meta["status"] != "implemented":
         raise HTTPException(409, f"cannot accept from status {meta['status']}")
@@ -130,6 +145,7 @@ def feedback_accept(fid: str):
 
 @router.post("/{fid}/discard")
 def feedback_discard(fid: str):
+    _control_only()
     meta = _get(fid)
     if meta["status"] not in ("implemented", "failed", "triaged"):
         raise HTTPException(409, f"cannot discard from status {meta['status']}")
@@ -142,6 +158,7 @@ def feedback_retry(fid: str):
     """Re-enter the pipeline at the right place after a failure, or re-run the
     coding pass on an implemented item (e.g. after posting follow-up comments) —
     the runner stops the old preview and reuses its port."""
+    _control_only()
     meta = _get(fid)
     if meta["status"] not in ("failed", "captured", "discarded", "implemented"):
         raise HTTPException(409, f"cannot retry from status {meta['status']}")
@@ -154,6 +171,7 @@ def feedback_retry(fid: str):
 
 @router.delete("/{fid}")
 def feedback_delete(fid: str):
+    _control_only()
     meta = _get(fid)
     if meta["status"] not in store.TERMINAL:
         raise HTTPException(409, f"cannot delete an item in status {meta['status']}")

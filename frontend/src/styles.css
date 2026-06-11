@@ -313,3 +313,6 @@ button.more { margin-top:12px; }
 .fb-comment-text { white-space:pre-wrap; }
 .fb-comment audio { height:28px; max-width:320px; }
 .fb-comment-composer { margin:8px 0 0; }
+.fb-previewbanner { margin:10px 0 0; padding:8px 12px; font-size:13px;
+  background:#3a2f12; border:1px solid #6b5518; border-radius:6px; }
+.fb-previewbanner a { color:#e8c35a; }
