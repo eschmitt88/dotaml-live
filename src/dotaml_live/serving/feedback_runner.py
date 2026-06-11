@@ -8,6 +8,8 @@ state; the API process just reads it.
 Stages (python -m dotaml_live.serving.feedback_runner <stage> <id>):
 
     intake     voice → transcript (faster-whisper), then claude triage → ticket
+    comment    transcribe any new voice comments, then claude folds the comment
+               text into a revised ticket — runs right after a comment is posted
     implement  git worktree + branch, claude implements the ticket, builds the
                SPA, starts a dev preview server on a free port (8091–8099)
     accept     stop preview, merge branch into master, rebuild main SPA,
@@ -128,25 +130,66 @@ Reply with ONLY a JSON object, no fences, no prose:
 """
 
 
-def _claude_triage(raw_text: str) -> dict:
+REVISE_PROMPT = """\
+You maintain the improvement-ticket queue for dotaml-live, a personal Dota 2
+draft-analysis web dashboard (FastAPI backend in src/dotaml_live/, React+Vite
+SPA in frontend/src/). The user posted follow-up comments on the ticket below.
+Fold them into the ticket so it reflects the latest intent — keep what still
+applies, revise only what the comments change. You may read the repo to ground
+file references.
+
+CURRENT TICKET (JSON):
+{ticket}
+
+ORIGINAL FEEDBACK (verbatim, may be a rough voice transcript):
+\"\"\"{raw}\"\"\"
+
+FOLLOW-UP COMMENTS (oldest first, possibly rough voice transcripts):
+{comments}
+
+Reply with ONLY the full revised ticket as a JSON object, no fences, no prose:
+{{"title": "<imperative, max 8 words>",
+  "summary": "<1-2 sentences: what the user wants and why>",
+  "details": "<concrete guidance for the implementer: what to change and where (real paths), behavior, edge cases>",
+  "area": "<frontend|backend|model|pipeline|other>",
+  "acceptance": ["<up to 4 short, testable criteria>"]}}
+If the comments require no ticket change, return the current ticket unchanged.
+"""
+
+
+def _claude_ticket(prompt: str) -> dict:
+    """Run a read-only claude pass that must reply with a ticket JSON object."""
     fb = _cfg()
-    cmd = [_claude_bin(), "-p", TRIAGE_PROMPT.format(raw=raw_text),
+    cmd = [_claude_bin(), "-p", prompt,
            "--output-format", "json",
            "--allowedTools", "Read", "Glob", "Grep",
            "--model", fb.get("triage_model", "sonnet")]
     out = subprocess.run(cmd, cwd=str(REPO), capture_output=True, text=True,
                          timeout=600, env=_runner_env())
     if out.returncode != 0:
-        raise RuntimeError(f"claude triage failed: {out.stderr.strip()[:500]}")
+        raise RuntimeError(f"claude ticket pass failed: {out.stderr.strip()[:500]}")
     result = json.loads(out.stdout).get("result", "")
     m = re.search(r"\{.*\}", result, re.DOTALL)
     if not m:
-        raise RuntimeError(f"triage returned no JSON: {result[:300]}")
+        raise RuntimeError(f"ticket pass returned no JSON: {result[:300]}")
     ticket = json.loads(m.group(0))
     for k in ("title", "summary", "details", "area", "acceptance"):
         ticket.setdefault(k, "" if k != "acceptance" else [])
     ticket["title"] = str(ticket["title"]).strip()[:80] or "Untitled improvement"
     return ticket
+
+
+def _claude_triage(raw_text: str) -> dict:
+    return _claude_ticket(TRIAGE_PROMPT.format(raw=raw_text))
+
+
+def _claude_revise(meta: dict) -> dict:
+    comments = "\n".join(
+        f"- [{c.get('at', '?')}, {c.get('source', 'text')}] {c['text'].strip()}"
+        for c in meta.get("comments") or [] if (c.get("text") or "").strip())
+    return _claude_ticket(REVISE_PROMPT.format(
+        ticket=json.dumps(meta["ticket"], indent=1),
+        raw=meta.get("raw_text") or "", comments=comments))
 
 
 IMPLEMENT_PROMPT = """\
@@ -164,7 +207,7 @@ acceptance criteria:
 
 ORIGINAL USER FEEDBACK (verbatim, may be a rough voice transcript):
 \"\"\"{raw}\"\"\"
-{comments_section}
+{comments_section}{worktree_state}
 REPO ORIENTATION
 - FastAPI backend: src/dotaml_live/serving/ (app.py, routes/, schemas.py); domain
   logic in src/dotaml_live/queries|model|features|pipeline.
@@ -208,6 +251,34 @@ def _comments_section(meta: dict) -> str:
     return COMMENTS_SECTION.format(comments="\n".join(lines))
 
 
+WORKTREE_STATE_SECTION = """
+## Current worktree state
+The branch already carries commits from a previous implementation pass. You are
+starting from that code, not from a clean master — review what is already there
+and build on or revise it rather than redoing it blind.
+
+Commits (git log --oneline master..HEAD):
+{log}
+
+Changed files (git diff --stat master...HEAD):
+{diff}
+"""
+
+
+def _worktree_state_section(branch: str | None) -> str:
+    """Summary of prior commits on the feedback branch; '' for a fresh ticket."""
+    if not branch:
+        return ""
+    log = subprocess.run(["git", "log", "--oneline", f"master..{branch}"],
+                         cwd=str(REPO), capture_output=True, text=True, timeout=30)
+    if log.returncode != 0 or not log.stdout.strip():
+        return ""
+    diff = subprocess.run(["git", "diff", "--stat", f"master...{branch}"],
+                          cwd=str(REPO), capture_output=True, text=True, timeout=30)
+    return WORKTREE_STATE_SECTION.format(
+        log=log.stdout.strip(), diff=diff.stdout.strip()[:4000] or "(none)")
+
+
 def _fmt_stream_line(line: str) -> list[str]:
     """Render one claude stream-json line as human-readable log lines."""
     try:
@@ -229,7 +300,8 @@ def _fmt_stream_line(line: str) -> list[str]:
     return out
 
 
-def _claude_implement(meta: dict, wt: Path, log_file: Path) -> dict:
+def _claude_implement(meta: dict, wt: Path, log_file: Path,
+                      worktree_state: str = "") -> dict:
     fb = _cfg()
     t = meta["ticket"]
     prompt = IMPLEMENT_PROMPT.format(
@@ -237,7 +309,7 @@ def _claude_implement(meta: dict, wt: Path, log_file: Path) -> dict:
         details=t["details"], area=t["area"],
         acceptance="\n".join(f"- {a}" for a in t["acceptance"]) or "- (none given)",
         raw=meta.get("raw_text") or "", comments_section=_comments_section(meta),
-        repo=REPO, wt=wt, python=sys.executable)
+        worktree_state=worktree_state, repo=REPO, wt=wt, python=sys.executable)
     cmd = [_claude_bin(), "-p", prompt, "--dangerously-skip-permissions",
            "--output-format", "stream-json", "--verbose"]
     if fb.get("implement_model"):
@@ -293,6 +365,36 @@ def transcribe_file_safe(transcribe_mod, path: Path) -> str:
     if not text:
         raise RuntimeError("transcription produced no text — re-record?")
     return text
+
+
+def _transcribe_comments(fid: str, meta: dict) -> dict:
+    """Fill in `text` for any voice comments that lack a transcript."""
+    comments = meta.get("comments") or []
+    if any(c.get("audio") and not c.get("text") for c in comments):
+        from . import transcribe
+        for i, c in enumerate(comments):
+            if c.get("audio") and not c.get("text"):
+                c["text"] = transcribe.transcribe_file(store.comment_audio_path(fid, i))
+        meta = store.update(fid, comments=comments)
+    return meta
+
+
+def stage_comment(fid: str) -> None:
+    """Runs right after a comment is posted: transcribe any voice comments and
+    fold the comment text into a revised ticket, so the transcript and proposed
+    revisions show up immediately instead of waiting for the next implement
+    pass. Never fails the item — the comment audio is kept either way, and
+    stage_implement re-runs the transcription as a fallback."""
+    meta = store.load(fid)
+    try:
+        meta = _transcribe_comments(fid, meta)
+        if meta.get("ticket") and any((c.get("text") or "").strip()
+                                      for c in meta.get("comments") or []):
+            meta = store.update(fid, ticket=_claude_revise(meta))
+        if (meta.get("error") or "").startswith("comment:"):
+            store.update(fid, error=None)
+    except Exception as e:                     # noqa: BLE001 — surface in the queue UI
+        store.update(fid, error=f"comment: {e}")
 
 
 def _slug(title: str) -> str:
@@ -361,23 +463,32 @@ def stage_implement(fid: str) -> None:
     # re-implement: keep the dev preview URL stable by reusing the prior port
     prev_port = (meta.get("dev") or {}).get("port")
 
-    slug = _slug(meta["ticket"]["title"])
-    branch = f"feedback/{fid.rsplit('-', 1)[-1]}-{slug}"
+    # re-implement: if a prior pass left commits on the branch, keep them and
+    # tell the implementer what is already there instead of starting blind
+    worktree_state = _worktree_state_section(meta.get("branch"))
+
     wt = WORKTREES / f"feedback-{fid}"
-    cleanup_workspace(fid)                      # stop old preview, drop worktree+branch
+    stop_dev_server(meta)
+    if wt.exists():
+        subprocess.run(["git", "worktree", "remove", "--force", str(wt)],
+                       cwd=str(REPO), capture_output=True, timeout=60)
     WORKTREES.mkdir(exist_ok=True)
-    subprocess.run(["git", "worktree", "add", "-b", branch, str(wt), "master"],
-                   cwd=str(REPO), check=True, capture_output=True, timeout=120)
-    meta = store.update(fid, branch=branch, worktree=str(wt), impl=None)
+    if worktree_state:
+        branch = meta["branch"]                 # resume the prior pass's branch
+        subprocess.run(["git", "worktree", "add", str(wt), branch],
+                       cwd=str(REPO), check=True, capture_output=True, timeout=120)
+    else:
+        if meta.get("branch"):
+            subprocess.run(["git", "branch", "-D", meta["branch"]],
+                           cwd=str(REPO), capture_output=True, timeout=30)
+        slug = _slug(meta["ticket"]["title"])
+        branch = f"feedback/{fid.rsplit('-', 1)[-1]}-{slug}"
+        subprocess.run(["git", "worktree", "add", "-b", branch, str(wt), "master"],
+                       cwd=str(REPO), check=True, capture_output=True, timeout=120)
+    meta = store.update(fid, branch=branch, worktree=str(wt), impl=None, dev=None)
 
     # voice comments need a transcript before they can go into the prompt
-    comments = meta.get("comments") or []
-    if any(c.get("audio") and not c.get("text") for c in comments):
-        from . import transcribe
-        for i, c in enumerate(comments):
-            if c.get("audio") and not c.get("text"):
-                c["text"] = transcribe.transcribe_file(store.comment_audio_path(fid, i))
-        meta = store.update(fid, comments=comments)
+    meta = _transcribe_comments(fid, meta)
 
     # seed node_modules so the implementer's npm install/build is fast
     if (REPO / "frontend" / "node_modules").exists():
@@ -385,7 +496,7 @@ def stage_implement(fid: str) -> None:
                         str(wt / "frontend" / "node_modules")], timeout=120)
 
     log_file = store.log_path(fid)
-    info = _claude_implement(meta, wt, log_file)
+    info = _claude_implement(meta, wt, log_file, worktree_state=worktree_state)
 
     n = subprocess.run(["git", "rev-list", "--count", "master..HEAD"], cwd=str(wt),
                        capture_output=True, text=True, timeout=30)
@@ -451,7 +562,8 @@ def stage_accept(fid: str) -> None:
                    capture_output=True, timeout=120)
 
 
-STAGES = {"intake": stage_intake, "implement": stage_implement, "accept": stage_accept}
+STAGES = {"intake": stage_intake, "comment": stage_comment,
+          "implement": stage_implement, "accept": stage_accept}
 
 
 def main() -> None:

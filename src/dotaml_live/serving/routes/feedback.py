@@ -71,7 +71,9 @@ def feedback_audio_file(fid: str):
 
 @router.post("/{fid}/comment")
 async def feedback_comment(fid: str, request: Request):
-    """Targeted comment on one ticket — JSON {text} or raw voice-memo bytes."""
+    """Targeted comment on one ticket — JSON {text} or raw voice-memo bytes.
+    Spawns a background pass that transcribes voice comments and folds the
+    comment into a revised ticket right away (no retry needed to see either)."""
     meta = _get(fid)
     if meta["status"] in ("done", "rejected", "discarded"):
         raise HTTPException(409, f"cannot comment on an item in status {meta['status']}")
@@ -80,11 +82,14 @@ async def feedback_comment(fid: str, request: Request):
         text = (body.get("text") or "").strip()
         if not text:
             raise HTTPException(400, "empty comment text")
-        return store.add_comment(fid, text=text)
-    data = await request.body()
-    if len(data) < 1000:
-        raise HTTPException(400, "audio too short — hold the mic a bit longer")
-    return store.add_comment(fid, audio=data)
+        meta = store.add_comment(fid, text=text)
+    else:
+        data = await request.body()
+        if len(data) < 1000:
+            raise HTTPException(400, "audio too short — hold the mic a bit longer")
+        meta = store.add_comment(fid, audio=data)
+    spawn_stage("comment", fid)
+    return meta
 
 
 @router.get("/{fid}/comment/{idx}/audio")

@@ -1056,9 +1056,10 @@ function FeedbackItem({ item, onChanged, onErr }) {
           {item.comments?.map((c, i) => (
             <div key={i} className="fb-comment">
               <span className="fb-comment-when">{c.at.slice(5, 16).replace('T', ' ')}</span>
-              {c.source === 'voice'
-                ? <audio controls preload="none" src={`/api/feedback/${item.id}/comment/${i}/audio`} />
-                : <span className="fb-comment-text">{c.text}</span>}
+              {c.source === 'voice' && <audio controls preload="none" src={`/api/feedback/${item.id}/comment/${i}/audio`} />}
+              {c.text
+                ? <span className="fb-comment-text">{c.text}</span>
+                : c.source === 'voice' && <span className="muted">transcribing…</span>}
             </div>
           ))}
           {composing && <FbCommentComposer id={item.id}
