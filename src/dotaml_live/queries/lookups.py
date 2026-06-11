@@ -70,6 +70,32 @@ def hero_id_to_attr() -> dict[int, str]:
     return {int(k): h.get("primary_attr", "?") for k, h in _heroes_json().items()}
 
 
+@lru_cache(maxsize=1)
+def _hero_abilities_json() -> dict:
+    """hero_abilities.json: npc hero name -> [{'dname', 'desc'}, ...].
+
+    Regenerated from the OpenDota constants by
+    `python -m dotaml_live.queries._refresh_hero_abilities`. Returns {} when
+    the file is missing or unreadable so callers can fall back gracefully.
+    """
+    try:
+        with open(SERVE_DIR / "hero_abilities.json") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+@lru_cache(maxsize=256)
+def hero_id_to_abilities(hid: int) -> list[str]:
+    """Short 'Dname: desc' strings for a hero's abilities; [] on any miss."""
+    h = _heroes_json().get(str(int(hid)))
+    if h is None:
+        return []
+    return [f"{a['dname']}: {a['desc']}"
+            for a in _hero_abilities_json().get(h.get("name", ""), [])
+            if a.get("dname") and a.get("desc")]
+
+
 def hero_name(hid: int) -> str:
     return hero_id_to_name().get(int(hid), f"hero_{hid}")
 
@@ -258,7 +284,7 @@ def sample_unknown_heroes(n_slots: int,
 __all__ = [
     "ANON_ACCOUNT_IDS",
     "hero_id_to_name", "hero_name_to_id", "hero_id_to_roles", "hero_id_to_attr",
-    "hero_name", "hero_id",
+    "hero_id_to_abilities", "hero_name", "hero_id",
     "item_id_to_info", "item_name", "item_cost",
     "item_id_to_components", "decompose_item",
     "lookup_player_features", "get_player_features_or_default",
