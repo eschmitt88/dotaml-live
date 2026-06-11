@@ -55,6 +55,9 @@ def _claude_bin() -> str:
 def _runner_env() -> dict:
     env = dict(os.environ)
     env["PATH"] = f"{Path.home()}/.local/bin:/usr/local/bin:/usr/bin:/bin"
+    # the runner's own PYTHONPATH (pinned by spawn_stage) must not leak into
+    # claude's shell — a `pytest` run inside a worktree would import this tree
+    env.pop("PYTHONPATH", None)
     return env
 
 
@@ -65,18 +68,28 @@ def spawn_stage(stage: str, fid: str) -> None:
 
     systemd-run gives the runner its own cgroup so `systemctl restart
     dotaml-live-dashboard` can't kill it; plain Popen is the fallback.
+
+    The runner is pinned to the spawning process's code (PYTHONPATH) and data
+    (DOTAML_*): a dev-preview instance must run its own worktree's stages, not
+    whatever the main checkout's editable install happens to be.
     """
     cmd = [sys.executable, "-m", "dotaml_live.serving.feedback_runner", stage, fid]
     unit = f"dotaml-feedback-{stage}-{fid}"
+    env = {
+        "PATH": f"{Path.home()}/.local/bin:/usr/local/bin:/usr/bin:/bin",
+        "PYTHONPATH": str(paths.SRC_DIR),
+        "DOTAML_DATA": str(paths.DATA_DIR),
+        "DOTAML_REGISTRY": str(paths.REGISTRY_DIR),
+    }
     sd = ["systemd-run", "--user", "--collect", f"--unit={unit}",
           f"--working-directory={REPO}",
-          f"--setenv=PATH={Path.home()}/.local/bin:/usr/local/bin:/usr/bin:/bin",
+          *[f"--setenv={k}={v}" for k, v in env.items()],
           *cmd]
     try:
         subprocess.run(sd, check=True, capture_output=True, timeout=15)
     except (subprocess.SubprocessError, FileNotFoundError):
         subprocess.Popen(cmd, cwd=str(REPO), start_new_session=True,
-                         env=_runner_env(),
+                         env={**os.environ, **env},
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
@@ -456,8 +469,14 @@ STAGES = {"intake": stage_intake, "implement": stage_implement, "accept": stage_
 
 def main() -> None:
     stage, fid = sys.argv[1], sys.argv[2]
+    fn = STAGES.get(stage)
+    if fn is None:
+        store.set_status(fid, "failed",
+                         f"stage '{stage}' unknown to the runner's code at "
+                         f"{Path(__file__).resolve().parent} — spawned by a newer API?")
+        sys.exit(2)
     try:
-        STAGES[stage](fid)
+        fn(fid)
     except Exception as e:                     # noqa: BLE001 — surface in the queue UI
         store.set_status(fid, "failed", f"{stage}: {e}")
         raise

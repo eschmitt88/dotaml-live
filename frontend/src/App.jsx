@@ -1030,12 +1030,17 @@ function FeedbackItem({ item, onChanged, onErr }) {
           <a className="fb-preview" href={devUrl} target="_blank" rel="noreferrer">⧉ Open dev preview :{item.dev.port}</a>
           <button disabled={acting} onClick={() => act('accept')}>✓ Accept & deploy</button>
           {item.comments?.length > 0 &&
-            <button className="ghost" disabled={acting} onClick={() => act('retry')}>
+            <button className="ghost" disabled={acting} onClick={() => act('retry')}
+              title="Re-runs the coding pass on this ticket with all comments folded in (voice comments are transcribed first). Replaces this preview build.">
               ↻ Re-implement with comments</button>}
           <button className="ghost danger" disabled={acting} onClick={() => act('discard')}>Discard</button>
         </>}
         {item.status === 'failed' && <>
-          <button disabled={acting} onClick={() => act('retry')}>↻ Retry</button>
+          <button disabled={acting} onClick={() => act('retry')}
+            title={item.ticket
+              ? 'The ticket already exists, so this re-runs only the implementation: fresh coding pass on the ticket + all comments (voice comments transcribed first). Triage is not redone.'
+              : 'No ticket yet, so this re-runs intake: transcribe the memo and triage it into a ticket.'}>
+            ↻ {item.ticket ? 'Retry implementation' : 'Retry transcription & triage'}</button>
           <button className="ghost" disabled={acting} onClick={() => act('reject')}>Reject</button>
         </>}
         {['done', 'rejected', 'discarded'].includes(item.status) &&
