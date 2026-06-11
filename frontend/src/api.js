@@ -30,6 +30,8 @@ export const api = {
   health: () => get('/health'),
   meta: () => get('/meta'),
   draftFromScreenshot: (blob) => postBlob('/api/draft-from-screenshot', blob),
+  settings: () => get('/api/settings'),
+  saveSettings: (b) => post('/api/settings', b),
   screenshots: (status = 'all') => get(`/api/screenshots?status=${status}`),
   labelScreenshot: (id, b) => post(`/api/screenshots/${id}/label`, b),
   deleteScreenshot: (id) => del(`/api/screenshots/${id}`),

@@ -163,6 +163,21 @@ def screenshot_delete(sid: str):
     return {"deleted": sid}
 
 
+@router.get("/settings")
+def settings_get():
+    """Dashboard preferences shared across browsers, ports, and dev previews
+    (data/settings.json) — e.g. the saved players + account IDs."""
+    from .. import settings_store
+    return settings_store.load()
+
+
+@router.post("/settings")
+def settings_set(partial: dict):
+    """Shallow-merge the posted keys into the stored settings (None deletes)."""
+    from .. import settings_store
+    return settings_store.update(partial)
+
+
 @router.get("/patch-status")
 def patch_status():
     """Latest patch-watch result (data/patch_status.json, refreshed by the nightly

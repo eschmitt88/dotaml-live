@@ -23,6 +23,38 @@ function usePersist(key, initial) {
   return [v, setV]
 }
 
+// ---- server-synced persistent state (data/settings.json via /api/settings) ----
+// localStorage is per-origin, so anything kept only there is "lost" on every
+// dev-preview port. The server file is shared by the main app and all previews.
+function useServerSetting(key, initial) {
+  const lsKey = `dl.${key}`
+  const [v, setV] = useState(() => {
+    try { const s = localStorage.getItem(lsKey); return s ? JSON.parse(s) : initial } catch { return initial }
+  })
+  const ready = useRef(false)
+  useEffect(() => {
+    let on = true
+    api.settings().then((s) => {
+      if (!on) return
+      ready.current = true
+      if (s[key] != null) setV(s[key])
+      else setV((cur) => {   // first run after upgrade: push existing local value up
+        if (JSON.stringify(cur) !== JSON.stringify(initial)) api.saveSettings({ [key]: cur }).catch(() => {})
+        return cur
+      })
+    }).catch(() => { ready.current = true })
+    return () => { on = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key])
+  useEffect(() => {
+    try { localStorage.setItem(lsKey, JSON.stringify(v)) } catch {}
+    if (!ready.current) return
+    const t = setTimeout(() => api.saveSettings({ [key]: v }).catch(() => {}), 400)
+    return () => clearTimeout(t)
+  }, [lsKey, key, v])
+  return [v, setV]
+}
+
 // ---- searchable, alphabetical, clearable hero picker ----
 function HeroCombo({ heroes, value, onChange, placeholder = '— empty —', nHeroes, onTabCommit }) {
   const [open, setOpen] = useState(false)
@@ -120,29 +152,80 @@ function PlayerPicker({ players, value, onPick }) {
   )
 }
 
-// ---- screenshot → draft (paste / drop / pick a Dota screenshot) ----
-// After a fill, the shot sits in the server's labeling queue; fixing the
-// slots and hitting ✓ stores the corrected board as its ground truth.
+// ---- screenshot → draft (capture the Dota monitor via the Screen Capture API) ----
+// The dashboard server is headless, so the grab happens in this browser, on the
+// machine that actually runs Dota. The first capture opens the browser's screen
+// picker (it lists every monitor) — pick the Dota one. The stream is then kept
+// alive at module scope, so every later capture is instant with no prompt until
+// the page closes or you hit stop. After a fill, the shot sits in the server's
+// labeling queue; fixing the slots and hitting ✓ stores it as ground truth.
+let screenStream = null   // survives tab switches / component re-mounts
+
 function ScreenshotFill({ onDraft, draft, pending, setPending }) {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState(null)
-  const [drag, setDrag] = useState(false)
-  const fileRef = useRef(null)
+  const [sharing, setSharing] = useState(() => !!screenStream?.active)
   const busyRef = useRef(false)
+  const canCapture = !!navigator.mediaDevices?.getDisplayMedia
 
-  const handle = async (blob) => {
-    if (!blob || !blob.type.startsWith('image/') || busyRef.current) return
+  const dropStream = () => {
+    if (screenStream) screenStream.getTracks().forEach((t) => t.stop())
+    screenStream = null
+    setSharing(false)
+  }
+
+  const acquire = async (repick) => {
+    if (repick) dropStream()
+    if (screenStream?.active) return screenStream
+    const s = await navigator.mediaDevices.getDisplayMedia({
+      video: { displaySurface: 'monitor', frameRate: 5,
+               width: { ideal: 3840 }, height: { ideal: 2160 } },  // native res, never upscaled
+      audio: false,
+      selfBrowserSurface: 'exclude',
+      surfaceSwitching: 'exclude',
+      monitorTypeSurfaces: 'include',
+    })
+    // user hit the browser's own "stop sharing" bar
+    s.getVideoTracks()[0].addEventListener('ended', () => { screenStream = null; setSharing(false) })
+    screenStream = s
+    setSharing(true)
+    return s
+  }
+
+  const grabFrame = async (stream) => {
+    const video = document.createElement('video')
+    video.srcObject = stream
+    video.muted = true
+    video.playsInline = true
+    await video.play()
+    if (video.requestVideoFrameCallback) await new Promise((res) => video.requestVideoFrameCallback(res))
+    else await new Promise((res) => setTimeout(res, 350))
+    const c = document.createElement('canvas')
+    c.width = video.videoWidth
+    c.height = video.videoHeight
+    c.getContext('2d').drawImage(video, 0, 0)
+    video.pause()
+    video.srcObject = null   // release the element but keep the stream for next time
+    return new Promise((res) => c.toBlob(res, 'image/png'))
+  }
+
+  const capture = async (repick = false) => {
+    if (busyRef.current || !canCapture) return
     busyRef.current = true
     setBusy(true); setMsg(null); setPending(null)
     try {
+      const blob = await grabFrame(await acquire(repick))
       const r = await api.draftFromScreenshot(blob)
       const n = r.detections.length
       onDraft([...r.radiant, ...r.dire])
       if (r.shot_id && !r.already_labeled) setPending(r.shot_id)
       setMsg(n
         ? { ok: true, text: `found ${n}/10 heroes in ${(r.elapsed_ms / 1000).toFixed(1)}s` }
-        : { ok: false, text: 'no heroes found — include the top bar in the shot' })
-    } catch (e) { setMsg({ ok: false, text: String(e) }) }
+        : { ok: false, text: 'no heroes found — is the draft on the shared monitor?' })
+    } catch (e) {
+      if (e?.name === 'NotAllowedError') setMsg({ ok: false, text: 'screen share cancelled' })
+      else setMsg({ ok: false, text: String(e) })
+    }
     busyRef.current = false
     setBusy(false)
   }
@@ -156,32 +239,30 @@ function ScreenshotFill({ onDraft, draft, pending, setPending }) {
     } catch (e) { setMsg({ ok: false, text: String(e) }) }
   }
 
-  useEffect(() => {
-    const onPaste = (e) => {
-      if (/INPUT|TEXTAREA/.test(e.target?.tagName || '')) return
-      const item = [...(e.clipboardData?.items || [])].find((i) => i.type.startsWith('image/'))
-      if (item) { e.preventDefault(); handle(item.getAsFile()) }
-    }
-    window.addEventListener('paste', onPaste)
-    return () => window.removeEventListener('paste', onPaste)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
+  const monLabel = screenStream?.getVideoTracks?.()[0]?.label || 'monitor'
   return (
-    <div className={`shot ${drag ? 'drag' : ''} ${busy ? 'busy' : ''}`}
-      onDragOver={(e) => { e.preventDefault(); setDrag(true) }}
-      onDragLeave={() => setDrag(false)}
-      onDrop={(e) => { e.preventDefault(); setDrag(false); handle(e.dataTransfer.files?.[0]) }}
-      onClick={() => !busy && fileRef.current?.click()}>
-      <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }}
-        onChange={(e) => { handle(e.target.files?.[0]); e.target.value = '' }} />
-      <span className="shot-main">
-        {busy ? '⏳ reading screenshot…' : <>📷 <b>Screenshot → draft</b></>}
-      </span>
-      {!busy && !pending && <span className="shot-hint">paste (Ctrl+V), drop, or click</span>}
+    <div className={`shot ${busy ? 'busy' : ''}`}>
+      <button className="shot-cap" disabled={busy || !canCapture} onClick={() => capture(false)}>
+        {busy ? '⏳ capturing…' : '📸 Capture screen'}
+      </button>
+      {!canCapture && (
+        <span className="shot-hint warn-hint"
+          title="getDisplayMedia needs HTTPS or localhost — open via localhost, or enable chrome://flags/#unsafely-treat-insecure-origin-as-secure for this origin">
+          ⚠ screen capture unavailable on this origin
+        </span>
+      )}
+      {canCapture && !sharing && !busy && !pending && (
+        <span className="shot-hint">first capture asks which monitor — pick the Dota one, it's remembered</span>
+      )}
+      {canCapture && sharing && !busy && !pending && (
+        <span className="shot-hint">sharing <b title={monLabel}>{monLabel}</b>
+          <button className="shot-link" title="pick a different monitor" onClick={() => capture(true)}>change</button>
+          <button className="shot-link" title="stop sharing" onClick={dropStream}>stop</button>
+        </span>
+      )}
       {msg && <span className={`shot-msg ${msg.ok ? 'ok' : 'bad'}`}>{msg.text}</span>}
       {pending && !busy && (
-        <span className="shot-confirm" onClick={(e) => e.stopPropagation()}>
+        <span className="shot-confirm">
           <span className="shot-hint">fix any wrong slots, then</span>
           <button className="shot-ok" onClick={confirm}>✓ confirm ground truth</button>
           <button className="shot-skip" title="leave in the labeling queue"
@@ -216,7 +297,7 @@ function DraftTab({ meta, draft, setDraft, nHeroes, pendingShot, setPendingShot 
   const [mySide, setMySide] = usePersist('dl.side', 'radiant')
   const [focusSlot, setFocusSlot] = useState(0)
   const [slotPlayer, setSlotPlayer] = useState(Array(10).fill(null))
-  const [players, setPlayers] = usePersist('dl.players', DEFAULT_PLAYERS)
+  const [players, setPlayers] = useServerSetting('players', DEFAULT_PLAYERS)
   const [favorites, setFavorites] = usePersist('dl.favs', [])
   const [auto, setAuto] = usePersist('dl.auto', true)
   const [settings, setSettings] = useState(false)
@@ -360,7 +441,8 @@ function DraftTab({ meta, draft, setDraft, nHeroes, pendingShot, setPendingShot 
 
         {settings && (
           <div className="settings">
-            <p className="hint">Set each account ID once — used for personalized predictions.</p>
+            <p className="hint">Set each account ID once — used for personalized predictions.
+              Saved on the server, so they survive reloads, restarts, and dev previews.</p>
             {players.map((p, i) => (
               <div key={p.id} className="prow">
                 <i className="dot" style={{ background: PCOLOR[i] }} />
