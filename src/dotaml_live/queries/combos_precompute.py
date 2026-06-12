@@ -129,6 +129,9 @@ def build_table(model_dir: str | Path, pair_samples: int = 6, trio_samples: int 
     out = {"computed": True, "version": model_dir.name, "n_heroes": len(heroes),
            "n_pairs": len(pairs), "n_trios_scored": len(trios), "n_trios_kept": len(trios_k),
            "synergy_scale": {"pairs": _quantile_grid(syn_p), "trios": _quantile_grid(syn_t_all)},
+           # trio kpm anchors cover only the kept slice — kpm for all ~325k
+           # trios is the sampled stat this module deliberately skips
+           "kpm_scale": {"pairs": _quantile_grid(kpm_p), "trios": _quantile_grid(kpm_t)},
            "combos": _rows(pairs, syn_p, kpm_p, avg_p, names, attr),
            "trios": _rows(trios_k, syn_t, kpm_t, avg_t, names, attr)}
     dest = paths.combos_table_json(model_dir)
@@ -155,6 +158,21 @@ def backfill_synergy_scale(model_dir: str | Path, f: V7Foundation | None = None)
     syn_t, _ = _synergy_scores(f, list(itertools.combinations(heroes, 3)), base, lift)
     table["synergy_scale"] = {"pairs": _quantile_grid(pair_syn),
                               "trios": _quantile_grid(syn_t)}
+    dest.write_text(json.dumps(table))
+    from . import artifacts
+    artifacts.load_combos_table.cache_clear()
+    return dest
+
+
+def backfill_kpm_scale(model_dir: str | Path) -> Path:
+    """Add kpm_scale quantile grids from the stored rows — no model needed.
+    Pairs cover all C(n,2); trios cover only the kept top-synergy slice, and
+    combo_explain words trio kpm percentiles as 'tracked trios' accordingly."""
+    dest = paths.combos_table_json(Path(model_dir))
+    table = json.loads(dest.read_text())
+    table["kpm_scale"] = {out_key: _quantile_grid([r["kpm"] for r in rows])
+                          for row_key, out_key in (("combos", "pairs"), ("trios", "trios"))
+                          if (rows := table.get(row_key))}
     dest.write_text(json.dumps(table))
     from . import artifacts
     artifacts.load_combos_table.cache_clear()

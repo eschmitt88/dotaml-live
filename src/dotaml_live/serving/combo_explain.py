@@ -100,6 +100,21 @@ def _scale_line(heroes: list[str], synergy: float) -> str:
         return ""
 
 
+def _kpm_context(heroes: list[str], kpm: float) -> str:
+    """Percentile suffix for the kills/min stat line; empty string on any miss.
+    Trio kpm anchors only cover the kept top-synergy slice (full trio kpm is
+    the sampled stat precompute deliberately skips), hence 'tracked trios'."""
+    try:
+        table = load_combos_table(str(paths.live_model_dir()))
+        scale = (table.get("kpm_scale") or {})[_SIZE_KEY[len(heroes)]]
+        q, n = scale["q"], scale["n"]
+        pct = _percentile(q, kpm)
+        pool = f"all {n:,} pairs" if len(heroes) == 2 else f"the {n:,} tracked trios"
+        return f" — {pct:.1f}th percentile of {pool} (median {q[50]:.2f})"
+    except Exception:
+        return ""
+
+
 def _abilities_block(heroes: list[str]) -> str:
     """'Abilities:' section — each hero's complete kit, full descriptions.
 
@@ -133,7 +148,8 @@ def build_prompt(heroes: list[str], synergy: float,
     if avg_winprob is not None:
         stats.append(f"Combined win rate in the data: {avg_winprob:.1%}")
     if kpm is not None:
-        stats.append(f"Average kills/min when paired: {kpm:.2f}")
+        stats.append(f"Average kills/min when paired: {kpm:.2f}"
+                     f"{_kpm_context(heroes, kpm)}")
     return PROMPT.format(heroes=" + ".join(_hero_blurb(h) for h in heroes),
                          synergy=synergy,
                          scale=_scale_line(heroes, synergy),

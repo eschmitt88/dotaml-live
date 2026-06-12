@@ -36,9 +36,16 @@ def _grid(lo: float, hi: float) -> list[float]:
     return [lo + (hi - lo) * i / 100 for i in range(101)]
 
 
+_FAKE_TABLE = {
+    "synergy_scale": {"pairs": {"n": 7875, "q": _grid(-0.02, 0.04)},
+                      "trios": {"n": 325000, "q": _grid(-0.03, 0.06)}},
+    "kpm_scale": {"pairs": {"n": 7875, "q": _grid(0.0, 1.0)},
+                  "trios": {"n": 2042, "q": _grid(0.0, 1.5)}},
+}
+
+
 def test_build_prompt_scale_line_for_pairs(monkeypatch):
-    fake = {"synergy_scale": {"pairs": {"n": 7875, "q": _grid(-0.02, 0.04)},
-                              "trios": {"n": 325000, "q": _grid(-0.03, 0.06)}}}
+    fake = _FAKE_TABLE
     monkeypatch.setattr(combo_explain, "load_combos_table", lambda d: fake)
     p = combo_explain.build_prompt(["Anti-Mage", "Crystal Maiden"], synergy=0.028)
     assert "For scale: across all 7,875 hero pairs" in p
@@ -48,20 +55,38 @@ def test_build_prompt_scale_line_for_pairs(monkeypatch):
 
 
 def test_build_prompt_scale_line_for_trios(monkeypatch):
-    fake = {"synergy_scale": {"pairs": {"n": 7875, "q": _grid(-0.02, 0.04)},
-                              "trios": {"n": 325000, "q": _grid(-0.03, 0.06)}}}
-    monkeypatch.setattr(combo_explain, "load_combos_table", lambda d: fake)
+    monkeypatch.setattr(combo_explain, "load_combos_table", lambda d: _FAKE_TABLE)
     p = combo_explain.build_prompt(["Anti-Mage", "Crystal Maiden", "Pudge"],
                                    synergy=0.06)
     assert "across all 325,000 hero trios" in p
     assert "This trio is at the 100.0th percentile." in p
 
 
+def test_build_prompt_kpm_percentile_for_pairs(monkeypatch):
+    monkeypatch.setattr(combo_explain, "load_combos_table", lambda d: _FAKE_TABLE)
+    p = combo_explain.build_prompt(["Anti-Mage", "Crystal Maiden"],
+                                   synergy=0.02, kpm=0.25)
+    # linear grid 0..1 → 0.25 sits at the 25th pct
+    assert ("Average kills/min when paired: 0.25 — 25.0th percentile "
+            "of all 7,875 pairs (median 0.50)") in p
+
+
+def test_build_prompt_kpm_percentile_for_trios_says_tracked(monkeypatch):
+    monkeypatch.setattr(combo_explain, "load_combos_table", lambda d: _FAKE_TABLE)
+    p = combo_explain.build_prompt(["Anti-Mage", "Crystal Maiden", "Pudge"],
+                                   synergy=0.02, kpm=0.75)
+    # trio kpm anchors only cover the kept slice → 'tracked trios' wording
+    assert "— 50.0th percentile of the 2,042 tracked trios (median 0.75)" in p
+
+
 def test_build_prompt_omits_scale_line_without_anchors(monkeypatch):
     monkeypatch.setattr(combo_explain, "load_combos_table",
                         lambda d: {"computed": True, "combos": []})
-    p = combo_explain.build_prompt(["Anti-Mage", "Crystal Maiden"], synergy=0.02)
+    p = combo_explain.build_prompt(["Anti-Mage", "Crystal Maiden"],
+                                   synergy=0.02, kpm=0.42)
     assert "For scale:" not in p
+    assert "percentile" not in p
+    assert "Average kills/min when paired: 0.42\n" in p   # bare stat line
     assert "Anti-Mage" in p                 # prompt still builds
 
 
