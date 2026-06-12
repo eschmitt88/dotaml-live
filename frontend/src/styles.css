@@ -138,8 +138,6 @@ input, select { background:#0c1116; color:var(--fg); border:1px solid var(--line
 .lane-hero { display:inline-flex; align-items:center; gap:6px; font-size:13px; cursor:grab; border:1px solid var(--line); border-radius:6px; padding:2px 6px; }
 .lane-hero.pinned { color:var(--org); border-color:var(--org); }
 .lane.drag-over { border-color:var(--blue); border-style:dashed; }
-.mid-badge { background:var(--blue); color:#fff; font-size:10px; padding:1px 6px; border-radius:4px; text-transform:uppercase; letter-spacing:.04em; }
-.mid-badge.pinned { background:var(--org); }
 .pin-btn { display:inline-flex; align-items:center; justify-content:center; background:transparent; border:1px solid var(--line); color:var(--mut); line-height:1; padding:2px 3px; border-radius:4px; }
 .pin-btn:hover { color:var(--fg); border-color:var(--blue); }
 .pin-ico { display:block; }

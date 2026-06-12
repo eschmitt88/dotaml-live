@@ -668,8 +668,6 @@ function DraftTab({ meta, draft, setDraft, nHeroes, pendingShot, setPendingShot 
                             onDragStart={(e) => e.dataTransfer.setData('text/plain', String(id))}>
                             <i className="dot" style={{ background: ATTR_COLOR[h?.attr || '?'] }} />
                             {h?.name || `#${id}`}
-                            {isMid && <span className={`mid-badge ${pinned ? 'pinned' : ''}`}>
-                              {pinned ? 'mid · pinned' : 'mid'}</span>}
                             {pinned ? (
                               <button className="pin-btn" title={`unpin — back to auto-resolved ${label.toLowerCase()}`}
                                 onClick={() => unpin(id)}><PinIcon filled /></button>
