@@ -661,10 +661,10 @@ function DraftTab({ meta, draft, setDraft, nHeroes, pendingShot, setPendingShot 
                               {pinned ? 'mid · pinned' : 'mid'}</span>}
                             {pinned ? (
                               <button className="pin-btn" title={`unpin — back to auto-resolved ${label.toLowerCase()}`}
-                                onClick={() => unpin(id)}>✕ unpin</button>
+                                onClick={() => unpin(id)}>×</button>
                             ) : (
                               <button className="pin-btn" title={`pin ${h?.name || 'this hero'} to ${label.toLowerCase()} and auto-resolve the rest`}
-                                onClick={() => pinTo(lane, id)}>📌 pin</button>
+                                onClick={() => pinTo(lane, id)}>⊕</button>
                             )}
                           </span>
                         )
