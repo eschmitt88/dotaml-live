@@ -12,7 +12,8 @@ from fastapi.responses import FileResponse, PlainTextResponse
 
 from .. import feedback_store as store
 from ..feedback_runner import cleanup_workspace, merge_probe, spawn_stage
-from ..schemas import FeedbackRejectReq, FeedbackTextReq
+from ..schemas import (FeedbackApproveReq, FeedbackRejectReq,
+                       FeedbackTextReq, FeedbackTicketPatchReq)
 
 router = APIRouter(prefix="/api/feedback", tags=["feedback"])
 
@@ -119,14 +120,39 @@ def feedback_comment_audio(fid: str, idx: int):
     return FileResponse(p)
 
 
+@router.patch("/{fid}/ticket")
+def feedback_ticket_patch(fid: str, req: FeedbackTicketPatchReq):
+    """Merge user edits into the stored ticket — no re-triage. Only allowed
+    in settled statuses; anything busy (FB_BUSY) would race the runner."""
+    meta = _get(fid)
+    if meta["status"] not in ("triaged", "failed", "implemented"):
+        raise HTTPException(409, f"cannot edit the ticket in status {meta['status']}")
+    if not meta.get("ticket"):
+        raise HTTPException(409, "no ticket to edit yet")
+    patch = {k: v for k, v in req.model_dump().items() if v is not None}
+    if "title" in patch:
+        patch["title"] = patch["title"].strip()
+        if not patch["title"]:
+            raise HTTPException(400, "title cannot be empty")
+    if "acceptance" in patch:
+        patch["acceptance"] = [a.strip() for a in patch["acceptance"] if a.strip()]
+        if not patch["acceptance"]:
+            raise HTTPException(400, "acceptance criteria cannot be empty")
+    return store.update(fid, ticket={**meta["ticket"], **patch})
+
+
 @router.post("/{fid}/approve")
-def feedback_approve(fid: str):
+def feedback_approve(fid: str, req: FeedbackApproveReq | None = None):
     _control_only()
     meta = _get(fid)
     if meta["status"] != "triaged":
         raise HTTPException(409, f"cannot approve from status {meta['status']}")
+    # persist per-ticket overrides before spawning so the runner sees them
+    meta = store.update(fid, error=None,
+                        implement_model=req.implement_model if req else None,
+                        implement_effort=req.implement_effort if req else None)
     spawn_stage("implement", fid)
-    return store.update(fid, error=None)
+    return meta
 
 
 @router.post("/{fid}/reject")

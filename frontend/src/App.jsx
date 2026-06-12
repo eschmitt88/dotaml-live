@@ -1037,6 +1037,10 @@ const FB_CHIP = {
   failed: ['failed', 'bad'], rejected: ['rejected', 'off'], discarded: ['discarded', 'off'],
 }
 const FB_BUSY = ['captured', 'transcribing', 'triaging', 'implementing', 'resolving', 'accepting']
+const FB_EDITABLE = ['triaged', 'failed', 'implemented']   // settled, runner not active
+const FB_MODELS = ['sonnet', 'opus', 'haiku']
+const FB_EFFORTS = ['low', 'medium', 'high']               // timeout mapping is server-side
+const FB_AREAS = ['frontend', 'backend', 'model', 'pipeline', 'other']
 
 function FeedbackComposer({ onSubmitted, recorder }) {
   const [text, setText] = useState('')
@@ -1170,15 +1174,93 @@ function FbCommentComposer({ id, onSubmitted }) {
   )
 }
 
-function FeedbackItem({ item, onChanged, onErr, preview }) {
+function ImplDefaults({ defaults, onSave }) {
+  return (
+    <div className="fb-defaults card">
+      <span className="fb-defaults-label">Implementation defaults</span>
+      <label>model
+        <select value={defaults.implement_model || ''}
+          onChange={(e) => onSave({ implement_model: e.target.value || null })}>
+          <option value="">CLI default</option>
+          {FB_MODELS.map((m) => <option key={m} value={m}>{m}</option>)}
+        </select>
+      </label>
+      <label>effort
+        <select value={defaults.implement_effort || ''}
+          onChange={(e) => onSave({ implement_effort: e.target.value || null })}>
+          <option value="">default</option>
+          {FB_EFFORTS.map((m) => <option key={m} value={m}>{m}</option>)}
+        </select>
+      </label>
+      <span className="muted">pre-fills the per-ticket selectors on approve</span>
+    </div>
+  )
+}
+
+function FbTicketEdit({ item, onSaved, onCancel }) {
+  const t = item.ticket
+  const [title, setTitle] = useState(t.title || '')
+  const [summary, setSummary] = useState(t.summary || '')
+  const [details, setDetails] = useState(t.details || '')
+  const [area, setArea] = useState(t.area || 'other')
+  const [acceptance, setAcceptance] = useState((t.acceptance || []).join('\n'))
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+
+  const save = async () => {
+    const acc = acceptance.split('\n').map((s) => s.trim()).filter(Boolean)
+    if (!title.trim()) { setErr('title cannot be empty'); return }
+    if (acc.length === 0) { setErr('add at least one acceptance criterion'); return }
+    setBusy(true); setErr(null)
+    try {
+      await api.patchFeedbackTicket(item.id,
+        { title: title.trim(), summary, details, area, acceptance: acc })
+      onSaved()
+    } catch (e) { setErr(String(e)) }
+    setBusy(false)
+  }
+
+  return (
+    <div className="fb-edit" onClick={(e) => e.stopPropagation()}>
+      <label>title
+        <input value={title} maxLength={80} onChange={(e) => setTitle(e.target.value)} /></label>
+      <label>summary
+        <textarea rows={2} value={summary} onChange={(e) => setSummary(e.target.value)} /></label>
+      <label>details
+        <textarea rows={5} value={details} onChange={(e) => setDetails(e.target.value)} /></label>
+      <label>area
+        <select value={area} onChange={(e) => setArea(e.target.value)}>
+          {FB_AREAS.map((a) => <option key={a} value={a}>{a}</option>)}
+        </select>
+      </label>
+      <label>acceptance criteria (one per line)
+        <textarea rows={4} value={acceptance} onChange={(e) => setAcceptance(e.target.value)} /></label>
+      <div className="fb-compose-row">
+        <span className="fb-spacer" />
+        {err && <span className="err inline">{err}</span>}
+        <button className="ghost" disabled={busy} onClick={onCancel}>Cancel</button>
+        <button disabled={busy} onClick={save}>{busy ? 'saving…' : 'Save ticket'}</button>
+      </div>
+    </div>
+  )
+}
+
+function FeedbackItem({ item, onChanged, onErr, preview, defaults }) {
   const [open, setOpen] = useState(false)
   const [showLog, setShowLog] = useState(false)
   const [acting, setActing] = useState(false)
   const [composing, setComposing] = useState(false)
+  const [editing, setEditing] = useState(false)
+  // per-ticket overrides: undefined -> follow the global default live
+  const [model, setModel] = useState(undefined)
+  const [effort, setEffort] = useState(undefined)
   const [label, kind] = FB_CHIP[item.status] || [item.status, 'off']
   const t = item.ticket
   const busy = FB_BUSY.includes(item.status)
   const canComment = ['implemented', 'triaged'].includes(item.status)
+  const canEdit = !busy && !!t && FB_EDITABLE.includes(item.status)
+  const effModel = model !== undefined ? model : (defaults?.implement_model || '')
+  const effEffort = effort !== undefined ? effort : (defaults?.implement_effort || '')
   const devUrl = item.status === 'implemented' && item.dev
     ? `http://${window.location.hostname}:${item.dev.port}/` : null
   const conflicted = item.merge_probe && !item.merge_probe.clean
@@ -1209,7 +1291,23 @@ function FeedbackItem({ item, onChanged, onErr, preview }) {
             testing copy — approve / accept / re-implement from the main dashboard ⧉</a>}
         {!preview && <>
           {item.status === 'triaged' && <>
-            <button disabled={acting} onClick={() => act('approve')}>✓ Approve — implement it</button>
+            <button disabled={acting} onClick={() => act(null, () =>
+              api.feedbackAction(item.id, 'approve', {
+                implement_model: effModel || null,
+                implement_effort: effEffort || null,
+              }))}>✓ Approve — implement it</button>
+            <label className="fb-implopt" title="model for this ticket's implementation pass">model
+              <select value={effModel} disabled={acting} onChange={(e) => setModel(e.target.value)}>
+                <option value="">default</option>
+                {FB_MODELS.map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </label>
+            <label className="fb-implopt" title="effort for this ticket's implementation pass (maps to a longer timeout server-side)">effort
+              <select value={effEffort} disabled={acting} onChange={(e) => setEffort(e.target.value)}>
+                <option value="">default</option>
+                {FB_EFFORTS.map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </label>
             <button className="ghost" disabled={acting} onClick={() => act('reject')}>Reject</button>
           </>}
           {devUrl && <>
@@ -1245,6 +1343,9 @@ function FeedbackItem({ item, onChanged, onErr, preview }) {
             <button className="ghost danger" disabled={acting}
               onClick={() => act(null, () => api.deleteFeedback(item.id))}>✕ remove</button>}
         </>}
+        {canEdit &&
+          <button className="ghost" onClick={() => setEditing((s) => !s)}>
+            {editing ? 'cancel edit' : '✎ edit ticket'}</button>}
         {canComment &&
           <button className="ghost" onClick={() => setComposing((s) => !s)}>
             {composing ? 'hide comment' : '💬 comment'}</button>}
@@ -1252,6 +1353,10 @@ function FeedbackItem({ item, onChanged, onErr, preview }) {
           <button className="ghost" onClick={() => setShowLog((s) => !s)}>
             {showLog ? 'hide log' : 'show log'}</button>}
       </div>
+
+      {editing && canEdit && <FbTicketEdit item={item}
+        onSaved={() => { setEditing(false); onChanged() }}
+        onCancel={() => setEditing(false)} />}
 
       {showLog && <FbLog id={item.id} live={busy} />}
 
@@ -1302,15 +1407,20 @@ function FeedbackTab({ recorder }) {
   const [err, setErr] = useState(null)
   const [showArchive, setShowArchive] = useState(false)
   const [preview, setPreview] = useState(false)
+  const [settings, setSettings] = useState({})
 
   const load = () => api.feedback().then((r) => { setItems(r.items); setErr(null) })
     .catch((e) => setErr(String(e)))
   useEffect(() => {
     api.health().then((h) => setPreview(!!h.dev_preview)).catch(() => {})
+    api.settings().then(setSettings).catch(() => {})
     load()
     const t = setInterval(load, 4000)
     return () => clearInterval(t)
   }, [])
+
+  const saveDefaults = (partial) =>
+    api.saveSettings(partial).then(setSettings).catch((e) => setErr(String(e)))
 
   if (err && !items) return <p className="err">{err}</p>
   if (!items) return <p>Loading feedback queue…</p>
@@ -1337,12 +1447,14 @@ function FeedbackTab({ recorder }) {
         comments here; approve / accept / re-implement / discard happen on
         the <a href={`http://${location.hostname}:8090/`}>main dashboard</a>.</p>}
       <FeedbackComposer onSubmitted={load} recorder={recorder} />
+      {!preview && <ImplDefaults defaults={settings} onSave={saveDefaults} />}
       {err && <p className="err">{err}</p>}
       {items.length === 0 && <p className="muted">Queue is empty — say what you wish this app did better.</p>}
       {groups.map(([name, list, cls]) => list.length > 0 && (
         <div key={name} className={`fb-group ${cls}`}>
           <h4>{name} <small>{list.length}</small></h4>
-          {list.map((i) => <FeedbackItem key={i.id} item={i} onChanged={load} onErr={setErr} preview={preview} />)}
+          {list.map((i) => <FeedbackItem key={i.id} item={i} onChanged={load} onErr={setErr}
+            preview={preview} defaults={settings} />)}
         </div>
       ))}
       {archive.length > 0 && (
@@ -1350,7 +1462,8 @@ function FeedbackTab({ recorder }) {
           <h4 className="fb-archtoggle" onClick={() => setShowArchive((s) => !s)}>
             {showArchive ? '▾' : '▸'} Archive <small>{archive.length}</small></h4>
           {showArchive && archive.map((i) =>
-            <FeedbackItem key={i.id} item={i} onChanged={load} onErr={setErr} preview={preview} />)}
+            <FeedbackItem key={i.id} item={i} onChanged={load} onErr={setErr}
+              preview={preview} defaults={settings} />)}
         </div>
       )}
     </section>

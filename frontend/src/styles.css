@@ -312,6 +312,17 @@ button.more { margin-top:12px; }
 .fb-preview:hover { background:#123421; }
 .fb-err { margin:8px 0 0; font-size:12px; }
 
+.fb-defaults { display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin:-8px 0 18px; padding:8px 12px; font-size:12px; }
+.fb-defaults-label { color:var(--mut); font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.06em; }
+.fb-defaults label, .fb-implopt { display:inline-flex; align-items:center; gap:6px; color:var(--mut); font-size:12px; }
+.fb-defaults select, .fb-implopt select { padding:3px 6px; font-size:12px; }
+.fb-defaults .muted { font-size:11px; }
+
+.fb-edit { border-top:1px solid var(--line); margin-top:10px; padding-top:10px; display:flex; flex-direction:column; gap:8px; }
+.fb-edit label { display:flex; flex-direction:column; gap:4px; color:var(--mut); font-size:12px; }
+.fb-edit input, .fb-edit textarea { font:inherit; font-size:13px; resize:vertical; }
+.fb-edit select { align-self:flex-start; font-size:13px; }
+
 .fb-detail { border-top:1px solid var(--line); margin-top:10px; padding-top:10px; font-size:13px; }
 .fb-sum { margin:0 0 6px; }
 .fb-det { margin:0 0 6px; color:var(--mut); white-space:pre-wrap; }

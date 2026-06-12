@@ -52,6 +52,24 @@ def _cfg() -> dict:
     return config.serving_config().get("feedback") or {}
 
 
+# effort label → coding-pass timeout; the frontend only ever sends the label
+EFFORT_TIMEOUT_MINUTES = {"low": 30, "medium": 60, "high": 180}
+
+
+def _implement_opts(meta: dict | None = None) -> tuple[str | None, float]:
+    """Resolve (model, timeout_minutes) for a coding pass: per-ticket override
+    (stored on the sidecar by /approve) → settings_store defaults →
+    config/serving.yaml values."""
+    from . import settings_store
+    fb, st, m = _cfg(), settings_store.load(), meta or {}
+    model = (m.get("implement_model") or st.get("implement_model")
+             or fb.get("implement_model"))
+    effort = m.get("implement_effort") or st.get("implement_effort")
+    minutes = (EFFORT_TIMEOUT_MINUTES.get(effort)
+               or float(fb.get("implement_timeout_minutes", 60)))
+    return model, minutes
+
+
 def _claude_bin() -> str:
     return shutil.which("claude") or str(Path.home() / ".local" / "bin" / "claude")
 
@@ -350,20 +368,22 @@ def _fmt_stream_line(line: str) -> list[str]:
     return out
 
 
-def _claude_code_pass(prompt: str, wt: Path, log_file: Path, header: str) -> dict:
+def _claude_code_pass(prompt: str, wt: Path, log_file: Path, header: str,
+                      meta: dict | None = None) -> dict:
     """Run a permissions-skipped claude coding pass inside the worktree,
     streaming a readable log. Returns {started, finished, cost_usd}."""
-    fb = _cfg()
+    model, minutes = _implement_opts(meta)
     cmd = [_claude_bin(), "-p", prompt, "--dangerously-skip-permissions",
            "--output-format", "stream-json", "--verbose"]
-    if fb.get("implement_model"):
-        cmd += ["--model", fb["implement_model"]]
-    timeout = float(fb.get("implement_timeout_minutes", 60)) * 60
+    if model:
+        cmd += ["--model", model]
+    timeout = minutes * 60
 
     info = {"started": _now_iso(), "cost_usd": None}
     deadline = time.monotonic() + timeout
     with open(log_file, "a") as lf:
         lf.write(f"=== {header} ===\n")
+        lf.write(f"— model: {model or 'cli default'} · timeout: {minutes:.0f} min\n")
         lf.flush()
         proc = subprocess.Popen(cmd, cwd=str(wt), text=True, env=_runner_env(),
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -397,7 +417,8 @@ def _claude_implement(meta: dict, wt: Path, log_file: Path,
         raw=meta.get("raw_text") or "", comments_section=_comments_section(meta),
         worktree_state=worktree_state, repo=REPO, wt=wt, python=sys.executable)
     return _claude_code_pass(prompt, wt, log_file,
-                             f"implement run {_now_iso()} (branch {meta['branch']})")
+                             f"implement run {_now_iso()} (branch {meta['branch']})",
+                             meta=meta)
 
 
 # ---------------------------------------------------------------- stages
@@ -652,7 +673,8 @@ def stage_resolve(fid: str) -> None:
             repo=REPO, wt=wt, python=sys.executable)
         pass_info = _claude_code_pass(
             prompt, wt, log_file,
-            f"resolve run {_now_iso()} (merging master into {meta['branch']})")
+            f"resolve run {_now_iso()} (merging master into {meta['branch']})",
+            meta=meta)
         info["resolve_cost_usd"] = pass_info.get("cost_usd")
 
         unmerged = subprocess.run(["git", "ls-files", "-u"], cwd=str(wt),
