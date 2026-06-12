@@ -23,15 +23,13 @@ def test_build_prompt_handles_unknown_hero_and_missing_stats():
     assert "-1.00%" in p
 
 
-def test_build_prompt_includes_hero_abilities():
+def test_build_prompt_includes_full_hero_kits():
     p = combo_explain.build_prompt(["Anti-Mage", "Crystal Maiden"], synergy=0.02)
-    assert "Key abilities:" in p
-    # at least 2 ability descriptions per known hero
-    assert "Mana Break" in p and "Blink" in p
-    assert "Crystal Nova" in p and "Frostbite" in p
-    for line in p.splitlines():
-        if line.startswith("- "):
-            assert len(line) < 250          # per-hero cap holds
+    assert "Abilities:" in p
+    # complete kit, ultimates included
+    assert "Mana Break" in p and "Blink" in p and "Mana Void" in p
+    assert "Crystal Nova" in p and "Frostbite" in p and "Freezing Field" in p
+    assert "…" not in p                     # descriptions are not truncated
 
 
 def test_build_prompt_falls_back_when_abilities_lookup_fails(monkeypatch):
@@ -39,7 +37,7 @@ def test_build_prompt_falls_back_when_abilities_lookup_fails(monkeypatch):
         raise OSError("hero_abilities.json unreadable")
     monkeypatch.setattr(combo_explain, "hero_id_to_abilities", boom)
     p = combo_explain.build_prompt(["Anti-Mage", "Pudge"], synergy=0.02)
-    assert "Key abilities:" not in p        # block omitted, prompt still builds
+    assert "Abilities:" not in p            # block omitted, prompt still builds
     assert "Anti-Mage" in p and "Pudge" in p
 
 

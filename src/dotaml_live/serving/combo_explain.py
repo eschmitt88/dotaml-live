@@ -40,11 +40,11 @@ Answer in 3-5 short sentences of plain prose. No headings, no bullet lists,
 no preamble — start directly with the explanation."""
 
 
-# Per-hero cap on the abilities line — keeps the prompt small enough that the
-# 300-token answer budget goes to reasoning, not to echoing ability text.
-ABILITIES_PER_HERO = 4
-ABILITY_CLIP_CHARS = 95    # two clipped abilities always fit the line cap below
-ABILITIES_LINE_CHARS = 200
+# The full ability catalog for a hero pair runs ~1-9k chars (~2k tokens worst
+# case), so no formatting-level clipping is needed. This cap exists only to
+# guard against a pathologically bloated/corrupt hero_abilities.json dragging
+# a massive payload into the prompt.
+ABILITIES_BLOCK_MAX_CHARS = 100_000
 
 
 def _hero_blurb(name: str) -> str:
@@ -57,19 +57,19 @@ def _hero_blurb(name: str) -> str:
     return f"{name} ({attr} — {roles})"
 
 
-def _clip(text: str, limit: int) -> str:
-    text = " ".join(text.split())
-    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+def _squash(text: str) -> str:
+    return " ".join(text.split())
 
 
 def _abilities_block(heroes: list[str]) -> str:
-    """'Key abilities:' section, one line per hero with ability data.
+    """'Abilities:' section — each hero's complete kit, full descriptions.
 
     Heroes missing from hero_abilities.json are simply skipped (their blurb
     still carries attr + roles); no data at all yields an empty string, so the
     prompt degrades to exactly its pre-abilities form.
     """
     lines = []
+    total = 0
     for name in heroes:
         try:
             hid = hero_id(name)
@@ -78,14 +78,14 @@ def _abilities_block(heroes: list[str]) -> str:
             abilities = []
         if not abilities:
             continue
-        parts = [_clip(a, ABILITY_CLIP_CHARS) for a in abilities[:ABILITIES_PER_HERO]]
-        line = "; ".join(parts[:2])
-        for part in parts[2:]:
-            if len(line) + 2 + len(part) > ABILITIES_LINE_CHARS:
-                break
-            line = f"{line}; {part}"
-        lines.append(f"- {name}: {line}")
-    return "Key abilities:\n" + "\n".join(lines) if lines else ""
+        hero_lines = [f"- {name}:"]
+        hero_lines += [f"  - {_squash(a)}" for a in abilities]
+        hero_chars = sum(len(l) + 1 for l in hero_lines)
+        if total + hero_chars > ABILITIES_BLOCK_MAX_CHARS:
+            break
+        lines += hero_lines
+        total += hero_chars
+    return "Abilities:\n" + "\n".join(lines) if lines else ""
 
 
 def build_prompt(heroes: list[str], synergy: float,
