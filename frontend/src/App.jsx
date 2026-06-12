@@ -333,6 +333,18 @@ function resolveLanes(ids, synOf, pins, midScore) {
 
 const fmtSyn = (v) => (v == null ? '—' : (v >= 0 ? '+' : '') + (v * 100).toFixed(2) + '%')
 
+function PinIcon({ filled }) {
+  return (
+    <svg className={`pin-ico ${filled ? 'filled' : ''}`} viewBox="0 0 24 24" width="12" height="12"
+      fill={filled ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2"
+      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M9 4v6l-2 4v2h10v-2l-2-4V4" />
+      <line x1="12" y1="16" x2="12" y2="21" />
+      <line x1="8" y1="4" x2="16" y2="4" />
+    </svg>
+  )
+}
+
 function DraftTab({ meta, draft, setDraft, nHeroes, pendingShot, setPendingShot }) {
   const heroes = useMemo(
     () => [...meta.heroes].sort((a, b) => a.name.localeCompare(b.name)), [meta])
@@ -646,7 +658,6 @@ function DraftTab({ meta, draft, setDraft, nHeroes, pendingShot, setPendingShot 
                       const id = Number(e.dataTransfer.getData('text/plain'))
                       if (myIds.includes(id)) pinTo(lane, id)
                     }}>
-                    <span className="lane-name">{label}</span>
                     <div className="lane-heroes">
                       {ids.map((id) => {
                         const h = heroById[id]
@@ -661,10 +672,10 @@ function DraftTab({ meta, draft, setDraft, nHeroes, pendingShot, setPendingShot 
                               {pinned ? 'mid · pinned' : 'mid'}</span>}
                             {pinned ? (
                               <button className="pin-btn" title={`unpin — back to auto-resolved ${label.toLowerCase()}`}
-                                onClick={() => unpin(id)}>×</button>
+                                onClick={() => unpin(id)}><PinIcon filled /></button>
                             ) : (
                               <button className="pin-btn" title={`pin ${h?.name || 'this hero'} to ${label.toLowerCase()} and auto-resolve the rest`}
-                                onClick={() => pinTo(lane, id)}>⊕</button>
+                                onClick={() => pinTo(lane, id)}><PinIcon /></button>
                             )}
                           </span>
                         )
