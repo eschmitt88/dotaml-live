@@ -16,7 +16,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from ..queries.lookups import hero_id, hero_id_to_attr, hero_id_to_roles
+from ..queries.lookups import (hero_id, hero_id_to_abilities, hero_id_to_attr,
+                               hero_id_to_roles)
 
 SDK_MODEL = "claude-haiku-4-5-20251001"   # cheap + fast; ~300-token answers
 CLI_MODEL = "haiku"
@@ -29,6 +30,7 @@ together (Turbo mode, casual stack with friends).
 Combo: {heroes}
 Model-estimated synergy: {synergy:+.2%} win-probability lift vs the heroes' individual baselines
 {stats}
+{abilities}
 Ground the explanation in their abilities, roles, and timing windows — e.g. setup
 into follow-up, lockdown into burst, save/sustain enabling a greedy core, or
 shared power spikes. If the synergy number is negative or the win rate is low,
@@ -36,6 +38,13 @@ say honestly why the pairing may underperform despite looking fun.
 
 Answer in 3-5 short sentences of plain prose. No headings, no bullet lists,
 no preamble — start directly with the explanation."""
+
+
+# Per-hero cap on the abilities line — keeps the prompt small enough that the
+# 300-token answer budget goes to reasoning, not to echoing ability text.
+ABILITIES_PER_HERO = 4
+ABILITY_CLIP_CHARS = 95    # two clipped abilities always fit the line cap below
+ABILITIES_LINE_CHARS = 200
 
 
 def _hero_blurb(name: str) -> str:
@@ -48,6 +57,37 @@ def _hero_blurb(name: str) -> str:
     return f"{name} ({attr} — {roles})"
 
 
+def _clip(text: str, limit: int) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+def _abilities_block(heroes: list[str]) -> str:
+    """'Key abilities:' section, one line per hero with ability data.
+
+    Heroes missing from hero_abilities.json are simply skipped (their blurb
+    still carries attr + roles); no data at all yields an empty string, so the
+    prompt degrades to exactly its pre-abilities form.
+    """
+    lines = []
+    for name in heroes:
+        try:
+            hid = hero_id(name)
+            abilities = hero_id_to_abilities(hid) if hid is not None else []
+        except Exception:
+            abilities = []
+        if not abilities:
+            continue
+        parts = [_clip(a, ABILITY_CLIP_CHARS) for a in abilities[:ABILITIES_PER_HERO]]
+        line = "; ".join(parts[:2])
+        for part in parts[2:]:
+            if len(line) + 2 + len(part) > ABILITIES_LINE_CHARS:
+                break
+            line = f"{line}; {part}"
+        lines.append(f"- {name}: {line}")
+    return "Key abilities:\n" + "\n".join(lines) if lines else ""
+
+
 def build_prompt(heroes: list[str], synergy: float,
                  avg_winprob: float | None = None, kpm: float | None = None) -> str:
     stats = []
@@ -57,7 +97,8 @@ def build_prompt(heroes: list[str], synergy: float,
         stats.append(f"Average kills/min when paired: {kpm:.2f}")
     return PROMPT.format(heroes=" + ".join(_hero_blurb(h) for h in heroes),
                          synergy=synergy,
-                         stats="\n".join(stats))
+                         stats="\n".join(stats),
+                         abilities=_abilities_block(heroes))
 
 
 def _have_api_key() -> bool:
