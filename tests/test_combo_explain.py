@@ -32,6 +32,39 @@ def test_build_prompt_includes_full_hero_kits():
     assert "…" not in p                     # descriptions are not truncated
 
 
+def _grid(lo: float, hi: float) -> list[float]:
+    return [lo + (hi - lo) * i / 100 for i in range(101)]
+
+
+def test_build_prompt_scale_line_for_pairs(monkeypatch):
+    fake = {"synergy_scale": {"pairs": {"n": 7875, "q": _grid(-0.02, 0.04)},
+                              "trios": {"n": 325000, "q": _grid(-0.03, 0.06)}}}
+    monkeypatch.setattr(combo_explain, "load_combos_table", lambda d: fake)
+    p = combo_explain.build_prompt(["Anti-Mage", "Crystal Maiden"], synergy=0.028)
+    assert "For scale: across all 7,875 hero pairs" in p
+    # linear grid -0.02..0.04 → 0.028 sits at (0.028+0.02)/0.06 = 80.0th pct
+    assert "This pair is at the 80.0th percentile." in p
+    assert "median +1.00%" in p
+
+
+def test_build_prompt_scale_line_for_trios(monkeypatch):
+    fake = {"synergy_scale": {"pairs": {"n": 7875, "q": _grid(-0.02, 0.04)},
+                              "trios": {"n": 325000, "q": _grid(-0.03, 0.06)}}}
+    monkeypatch.setattr(combo_explain, "load_combos_table", lambda d: fake)
+    p = combo_explain.build_prompt(["Anti-Mage", "Crystal Maiden", "Pudge"],
+                                   synergy=0.06)
+    assert "across all 325,000 hero trios" in p
+    assert "This trio is at the 100.0th percentile." in p
+
+
+def test_build_prompt_omits_scale_line_without_anchors(monkeypatch):
+    monkeypatch.setattr(combo_explain, "load_combos_table",
+                        lambda d: {"computed": True, "combos": []})
+    p = combo_explain.build_prompt(["Anti-Mage", "Crystal Maiden"], synergy=0.02)
+    assert "For scale:" not in p
+    assert "Anti-Mage" in p                 # prompt still builds
+
+
 def test_build_prompt_falls_back_when_abilities_lookup_fails(monkeypatch):
     def boom(hid):
         raise OSError("hero_abilities.json unreadable")

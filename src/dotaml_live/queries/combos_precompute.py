@@ -78,6 +78,14 @@ def _kpm_subsets(f, subsets, n_samples, seed=42):
     return kpm.reshape(len(subsets), n_samples).mean(axis=1)
 
 
+def _quantile_grid(syn) -> dict:
+    """101-point quantile grid (p0..p100) of a synergy distribution. Computed
+    over the FULL score set — for trios that's all ~325k, not the kept slice —
+    so combo_explain can place any synergy value at an honest percentile."""
+    q = np.quantile(np.asarray(syn, dtype=np.float64), np.linspace(0.0, 1.0, 101))
+    return {"n": int(len(syn)), "q": [round(float(v), 5) for v in q]}
+
+
 def _rows(subsets, syn, kpm, avg, names, attr):
     return [{"ids": list(s), "names": [names[h] for h in s],
              "attrs": [attr.get(h, "?") for h in s],
@@ -120,10 +128,34 @@ def build_table(model_dir: str | Path, pair_samples: int = 6, trio_samples: int 
 
     out = {"computed": True, "version": model_dir.name, "n_heroes": len(heroes),
            "n_pairs": len(pairs), "n_trios_scored": len(trios), "n_trios_kept": len(trios_k),
+           "synergy_scale": {"pairs": _quantile_grid(syn_p), "trios": _quantile_grid(syn_t_all)},
            "combos": _rows(pairs, syn_p, kpm_p, avg_p, names, attr),
            "trios": _rows(trios_k, syn_t, kpm_t, avg_t, names, attr)}
     dest = paths.combos_table_json(model_dir)
     dest.write_text(json.dumps(out))
+    from . import artifacts
+    artifacts.load_combos_table.cache_clear()
+    return dest
+
+
+def backfill_synergy_scale(model_dir: str | Path, f: V7Foundation | None = None) -> Path:
+    """Add synergy_scale quantile grids to a hero_combos.json built before the
+    field existed. Pair anchors come straight from the stored rows (all pairs
+    are kept); trio anchors require re-scoring all C(n,3) trios with the model,
+    since the table only keeps the top slice."""
+    model_dir = Path(model_dir)
+    dest = paths.combos_table_json(model_dir)
+    table = json.loads(dest.read_text())
+    pair_syn = [r["synergy"] for r in table.get("combos") or []]
+    if f is None:
+        f = V7Foundation(model_dir=model_dir)
+    names = hero_id_to_name()
+    heroes = sorted(h for h in names if 1 <= h <= 150)
+    base, lift = _base_and_lift(f, heroes)
+    syn_t, _ = _synergy_scores(f, list(itertools.combinations(heroes, 3)), base, lift)
+    table["synergy_scale"] = {"pairs": _quantile_grid(pair_syn),
+                              "trios": _quantile_grid(syn_t)}
+    dest.write_text(json.dumps(table))
     from . import artifacts
     artifacts.load_combos_table.cache_clear()
     return dest

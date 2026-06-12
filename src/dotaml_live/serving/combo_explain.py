@@ -11,11 +11,14 @@ One-shot, never precomputed or cached. Two credential paths, tried in order:
 
 from __future__ import annotations
 
+import bisect
 import os
 import shutil
 import subprocess
 from pathlib import Path
 
+from ..common import paths
+from ..queries.artifacts import load_combos_table
 from ..queries.lookups import (hero_id, hero_id_to_abilities, hero_id_to_attr,
                                hero_id_to_roles)
 
@@ -29,7 +32,7 @@ together (Turbo mode, casual stack with friends).
 
 Combo: {heroes}
 Model-estimated synergy: {synergy:+.2%} win-probability lift vs the heroes' individual baselines
-{stats}
+{scale}{stats}
 {abilities}
 Ground the explanation in their abilities, roles, and timing windows — e.g. setup
 into follow-up, lockdown into burst, save/sustain enabling a greedy core, or
@@ -59,6 +62,42 @@ def _hero_blurb(name: str) -> str:
 
 def _squash(text: str) -> str:
     return " ".join(text.split())
+
+
+_SIZE_KEY = {2: "pairs", 3: "trios"}
+_SIZE_NOUN = {2: "pair", 3: "trio"}
+
+
+def _percentile(q: list[float], x: float) -> float:
+    """Percentile of x against a sorted p0..p100 quantile grid (interpolated)."""
+    i = bisect.bisect_right(q, x)
+    if i == 0:
+        return 0.0
+    if i >= len(q):
+        return 100.0
+    lo, hi = q[i - 1], q[i]
+    frac = 0.0 if hi <= lo else (x - lo) / (hi - lo)
+    return (i - 1 + frac) * 100.0 / (len(q) - 1)
+
+
+def _scale_line(heroes: list[str], synergy: float) -> str:
+    """One 'For scale:' line anchoring the synergy number in the all-combos
+    distribution — without it the model misreads e.g. +2.9% (top-1% of all
+    pairs) as 'modest'. Anchors come from the precomputed table's
+    synergy_scale quantile grids; any miss yields an empty string and the
+    prompt degrades to its prior form."""
+    try:
+        table = load_combos_table(str(paths.live_model_dir()))
+        scale = (table.get("synergy_scale") or {})[_SIZE_KEY[len(heroes)]]
+        q, n = scale["q"], scale["n"]
+        pct = _percentile(q, synergy)
+        noun = _SIZE_NOUN[len(heroes)]
+        return (f"For scale: across all {n:,} hero {noun}s, synergy ranges "
+                f"{q[0]:+.2%} to {q[-1]:+.2%} (median {q[50]:+.2%}); top-decile "
+                f"starts at {q[90]:+.2%} and top-1% at {q[99]:+.2%}. This {noun} "
+                f"is at the {pct:.1f}th percentile.\n")
+    except Exception:
+        return ""
 
 
 def _abilities_block(heroes: list[str]) -> str:
@@ -97,6 +136,7 @@ def build_prompt(heroes: list[str], synergy: float,
         stats.append(f"Average kills/min when paired: {kpm:.2f}")
     return PROMPT.format(heroes=" + ".join(_hero_blurb(h) for h in heroes),
                          synergy=synergy,
+                         scale=_scale_line(heroes, synergy),
                          stats="\n".join(stats),
                          abilities=_abilities_block(heroes))
 
