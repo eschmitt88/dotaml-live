@@ -189,6 +189,7 @@ table.combos tr:hover td { background:#1b232d; }
 .attr { display:inline-block; color:#fff; font-size:9px; text-transform:uppercase; padding:1px 4px; border-radius:3px; vertical-align:middle; }
 .funbar { background:#0c1116; border-radius:4px; height:8px; width:90px; overflow:hidden; }
 .funbar > div { background:linear-gradient(90deg,#16a34a,#1f6feb); height:100%; }
+table.combos td.stat { cursor:help; }
 table.combos td.wr-low { color:#c79b2e; white-space:nowrap; }
 table.combos .wr-flag { margin-left:5px; font-size:11px; }
 table.combos tr.low-wr td.combo, table.combos tr.low-wr td.rank { opacity:.7; }

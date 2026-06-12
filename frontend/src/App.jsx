@@ -595,6 +595,25 @@ const METRIC_FILTERS = [
   ['kpm', 'Kills/min', (v) => v.toFixed(2)],
   ['fun', 'Fun', (v) => v.toFixed(2)],
 ]
+const METRIC_FMT = Object.fromEntries(METRIC_FILTERS.map(([k, , f]) => [k, f]))
+
+// percentile of x against a p0..p100 quantile grid (same interpolation as the
+// backend's combo_explain._percentile)
+function pctFromGrid(q, x) {
+  let i = 0
+  while (i < q.length && q[i] <= x) i++
+  if (i === 0) return 0
+  if (i >= q.length) return 100
+  const lo = q[i - 1], hi = q[i]
+  return ((i - 1 + (hi <= lo ? 0 : (x - lo) / (hi - lo))) * 100) / (q.length - 1)
+}
+
+// exact percentile rank of x within sorted values (for stats without a grid)
+function pctFromSorted(vals, x) {
+  let lo = 0, hi = vals.length
+  while (lo < hi) { const m = (lo + hi) >> 1; if (vals[m] <= x) lo = m + 1; else hi = m }
+  return (lo / vals.length) * 100
+}
 
 function MinSlider({ label, min, max, value, format, disabled, onChange }) {
   const step = (max - min) / 200 || 0.001
@@ -658,6 +677,28 @@ function DiscoverTab({ onAdd }) {
     }
     return b
   }, [rows])
+
+  // hover tooltip placing a stat value in its distribution. Synergy/kpm use the
+  // server quantile grids (full-distribution trio synergy; trio kpm covers only
+  // the kept slice); win rate and fun rank against the loaded rows.
+  const statTip = useMemo(() => {
+    const grids = { synergy: data?.synergy_scale?.[size], kpm: data?.kpm_scale?.[size] }
+    const sorted = {}
+    for (const [k] of METRIC_FILTERS)
+      sorted[k] = rows.map((c) => c[k]).filter((v) => v != null).sort((a, b) => a - b)
+    return (k, v) => {
+      if (v == null) return undefined
+      const g = grids[k]
+      if (!g && !sorted[k].length) return undefined
+      const pct = g ? pctFromGrid(g.q, v) : pctFromSorted(sorted[k], v)
+      const median = g ? g.q[50] : sorted[k][Math.floor(sorted[k].length / 2)]
+      const n = g ? g.n : sorted[k].length
+      const pool = size === 'pairs' ? `all ${n.toLocaleString()} pairs`
+        : (g && g.n === data?.n_trios_scored) ? `all ${n.toLocaleString()} trios`
+        : `${n.toLocaleString()} tracked trios`
+      return `${pct.toFixed(1)}th percentile of ${pool} · median ${METRIC_FMT[k](median)}`
+    }
+  }, [data, rows, size])
 
   // a slider at the data minimum is a no-op, never a filter
   const minActive = (k) => mins[k] != null && mins[k] > bounds[k][0]
@@ -735,14 +776,16 @@ function DiscoverTab({ onAdd }) {
                     <span key={j}>{j > 0 && <span className="plus">+</span>}<AttrTag a={c.attrs[j]} /> {n} </span>
                   ))}
                 </td>
-                <td className={c.synergy >= 0 ? 'pos' : 'neg'}>{c.synergy >= 0 ? '+' : ''}{(c.synergy * 100).toFixed(2)}%</td>
-                <td className={lowWr ? 'wr-low' : ''}>
+                <td className={`stat ${c.synergy >= 0 ? 'pos' : 'neg'}`}
+                  title={statTip('synergy', c.synergy)}>{c.synergy >= 0 ? '+' : ''}{(c.synergy * 100).toFixed(2)}%</td>
+                <td className={`stat ${lowWr ? 'wr-low' : ''}`} title={statTip('avg_winprob', c.avg_winprob)}>
                   {c.avg_winprob != null ? (c.avg_winprob * 100).toFixed(1) + '%' : '—'}
                   {lowWr && <span className="wr-flag"
                     title={`combined win rate below ${LOW_WINRATE_THRESHOLD * 100}% despite synergy`}>⚠</span>}
                 </td>
-                <td>{c.kpm.toFixed(2)}</td>
-                <td><div className="funbar"><div style={{ width: `${(c.fun / 2) * 100}%` }} /></div></td>
+                <td className="stat" title={statTip('kpm', c.kpm)}>{c.kpm.toFixed(2)}</td>
+                <td className="stat" title={statTip('fun', c.fun)}>
+                  <div className="funbar"><div style={{ width: `${(c.fun / 2) * 100}%` }} /></div></td>
                 <td className="row-actions"><button className="add-draft" title="add to draft (Radiant)"
                   onClick={() => onAdd(c.ids)}>＋ Draft</button>
                   <button className="explain-btn" title="ask Claude why this combo works"
