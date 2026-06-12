@@ -287,6 +287,32 @@ function Card({ title, sub, right, children, className = '' }) {
 
 // ---------------- Draft analysis tab ----------------
 
+// split 5 heroes into mid solo + two duos, maximizing summed pair synergy.
+// pinnedMid restricts the search to arrangements with that hero mid.
+// 5 mid choices x 3 splits of the rest = 15 arrangements (3 when pinned).
+function resolveLanes(ids, synOf, pinnedMid) {
+  let best = null
+  for (const mid of ids) {
+    if (pinnedMid && mid !== pinnedMid) continue
+    const rest = ids.filter((x) => x !== mid)
+    for (let j = 1; j < rest.length; j++) {
+      const a = [rest[0], rest[j]]
+      const b = rest.filter((x) => x !== a[0] && x !== a[1])
+      const sa = synOf(a[0], a[1]), sb = synOf(b[0], b[1])
+      const score = (sa ?? 0) + (sb ?? 0)
+      if (best && score <= best.score) continue
+      // the stronger duo takes the safe lane
+      const [safe, off] = (sa ?? 0) >= (sb ?? 0)
+        ? [{ ids: a, syn: sa }, { ids: b, syn: sb }]
+        : [{ ids: b, syn: sb }, { ids: a, syn: sa }]
+      best = { mid, safe, off, score }
+    }
+  }
+  return best
+}
+
+const fmtSyn = (v) => (v == null ? '—' : (v >= 0 ? '+' : '') + (v * 100).toFixed(2) + '%')
+
 function DraftTab({ meta, draft, setDraft, nHeroes, pendingShot, setPendingShot }) {
   const heroes = useMemo(
     () => [...meta.heroes].sort((a, b) => a.name.localeCompare(b.name)), [meta])
@@ -306,6 +332,25 @@ function DraftTab({ meta, draft, setDraft, nHeroes, pendingShot, setPendingShot 
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
   const seq = useRef(0)
+
+  // lane resolver: pair synergies from the precomputed combos table
+  const [combosTbl, setCombosTbl] = useState(null)
+  const [pinnedMid, setPinnedMid] = useState(null)
+  useEffect(() => { api.combosTable().then(setCombosTbl).catch(() => {}) }, [])
+  const pairSyn = useMemo(() => {
+    const m = new Map()
+    for (const c of combosTbl?.combos || [])
+      if (c.ids.length === 2) m.set([...c.ids].sort((a, b) => a - b).join('-'), c.synergy)
+    return m
+  }, [combosTbl])
+  const myIds = (mySide === 'radiant' ? RAD : DIRE).map((i) => draft[i]).filter(Boolean)
+  const lanes = useMemo(() => {
+    if (myIds.length !== 5 || new Set(myIds).size !== 5) return null
+    const synOf = (a, b) => pairSyn.get((a < b ? [a, b] : [b, a]).join('-')) ?? null
+    return resolveLanes(myIds, synOf, myIds.includes(pinnedMid) ? pinnedMid : null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(myIds), pairSyn, pinnedMid])
+  const pinActive = lanes != null && pinnedMid === lanes.mid
 
   const setHero = (i, v) => setDraft((d) => d.map((x, j) => (j === i ? v : x)))
   const chooseSide = (s) => { setMySide(s); setFocusSlot(s === 'radiant' ? 0 : 5) }
@@ -526,6 +571,52 @@ function DraftTab({ meta, draft, setDraft, nHeroes, pendingShot, setPendingShot 
               })}
             </ol>
           ) : <p className="muted">Pick a slot (○) to get recommendations.</p>}
+        </Card>
+
+        <Card className="lanes" title="Lanes"
+          sub={`max pair synergy · your team (${mySide})`}>
+          {!lanes ? (
+            <p className="muted">Draft all five {mySide} heroes (no duplicates) to auto-resolve lanes.</p>
+          ) : (
+            <div className="lane-list">
+              {[
+                ['Safe lane', lanes.safe.ids, lanes.safe.syn],
+                ['Mid', [lanes.mid], null],
+                ['Off lane', lanes.off.ids, lanes.off.syn],
+              ].map(([label, ids, syn]) => {
+                const isMid = label === 'Mid'
+                return (
+                  <div key={label} className={`lane ${isMid ? 'mid' : ''}`}>
+                    <span className="lane-name">{label}</span>
+                    <div className="lane-heroes">
+                      {ids.map((id) => {
+                        const h = heroById[id]
+                        return (
+                          <span key={id} className="lane-hero">
+                            <i className="dot" style={{ background: ATTR_COLOR[h?.attr || '?'] }} />
+                            {h?.name || `#${id}`}
+                            {isMid && <span className={`mid-badge ${pinActive ? 'pinned' : ''}`}>
+                              {pinActive ? 'mid · pinned' : 'mid'}</span>}
+                            {isMid ? (
+                              pinActive && <button className="pin-btn" title="unpin — back to auto-resolved mid"
+                                onClick={() => setPinnedMid(null)}>✕ unpin</button>
+                            ) : (
+                              <button className="pin-btn" title="pin this hero to mid and re-pair the rest"
+                                onClick={() => setPinnedMid(id)}>pin mid</button>
+                            )}
+                          </span>
+                        )
+                      })}
+                    </div>
+                    <span className={`lane-syn ${syn == null ? '' : syn >= 0 ? 'pos' : 'neg'}`}
+                      title={isMid ? 'solo lane' : syn == null ? 'no synergy data for this pair' : 'pair synergy'}>
+                      {isMid ? (pinActive ? 'pinned' : 'auto') : fmtSyn(syn)}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </Card>
 
         <div className="pred-row">
