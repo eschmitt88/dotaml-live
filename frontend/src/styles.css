@@ -139,6 +139,8 @@ input, select { background:#0c1116; color:var(--fg); border:1px solid var(--line
 .lane-hero { display:inline-flex; align-items:center; gap:6px; font-size:13px; }
 .mid-badge { background:var(--blue); color:#fff; font-size:10px; padding:1px 6px; border-radius:4px; text-transform:uppercase; letter-spacing:.04em; }
 .mid-badge.pinned { background:var(--org); }
+.pair-badge { background:transparent; border:1px dashed var(--mut); color:var(--mut); font-size:10px; padding:0 6px; border-radius:4px; text-transform:uppercase; letter-spacing:.04em; }
+.pair-badge.on { border-style:solid; border-color:var(--org); color:var(--org); }
 .pin-btn { background:transparent; border:1px solid var(--line); color:var(--mut); font-size:10px; padding:1px 6px; border-radius:4px; }
 .pin-btn:hover { color:var(--fg); border-color:var(--blue); }
 .lane-syn { flex:none; min-width:58px; text-align:right; font-size:12px; color:var(--mut); }

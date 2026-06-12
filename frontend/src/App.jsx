@@ -288,19 +288,26 @@ function Card({ title, sub, right, children, className = '' }) {
 // ---------------- Draft analysis tab ----------------
 
 // split 5 heroes into mid solo + two duos, maximizing summed pair synergy.
-// pinnedMid restricts the search to arrangements with that hero mid.
-// 5 mid choices x 3 splits of the rest = 15 arrangements (3 when pinned).
-function resolveLanes(ids, synOf, pinnedMid) {
+// pinnedMid restricts the search to arrangements with that hero mid; pinnedPair
+// ([a, b]) restricts it to arrangements that keep those two in the same duo
+// lane. midScore (hero id -> rank) breaks exact synergy ties — prefer a
+// core-shaped hero mid and keep supports in a duo lane.
+// 5 mid choices x 3 splits of the rest = 15 arrangements (fewer when pinned).
+function resolveLanes(ids, synOf, pinnedMid, pinnedPair, midScore) {
   let best = null
   for (const mid of ids) {
     if (pinnedMid && mid !== pinnedMid) continue
+    if (pinnedPair && pinnedPair.includes(mid)) continue
     const rest = ids.filter((x) => x !== mid)
     for (let j = 1; j < rest.length; j++) {
       const a = [rest[0], rest[j]]
       const b = rest.filter((x) => x !== a[0] && x !== a[1])
+      if (pinnedPair && a.includes(pinnedPair[0]) !== a.includes(pinnedPair[1])) continue
       const sa = synOf(a[0], a[1]), sb = synOf(b[0], b[1])
       const score = (sa ?? 0) + (sb ?? 0)
-      if (best && score <= best.score) continue
+      if (best && score < best.score) continue
+      if (best && score === best.score
+          && (midScore ? midScore(mid) : 0) <= (midScore ? midScore(best.mid) : 0)) continue
       // the stronger duo takes the safe lane
       const [safe, off] = (sa ?? 0) >= (sb ?? 0)
         ? [{ ids: a, syn: sa }, { ids: b, syn: sb }]
@@ -336,6 +343,7 @@ function DraftTab({ meta, draft, setDraft, nHeroes, pendingShot, setPendingShot 
   // lane resolver: pair synergies from the precomputed combos table
   const [combosTbl, setCombosTbl] = useState(null)
   const [pinnedMid, setPinnedMid] = useState(null)
+  const [pinnedPair, setPinnedPair] = useState([])   // 0-2 hero ids forced into one duo lane
   useEffect(() => { api.combosTable().then(setCombosTbl).catch(() => {}) }, [])
   const pairSyn = useMemo(() => {
     const m = new Map()
@@ -347,10 +355,28 @@ function DraftTab({ meta, draft, setDraft, nHeroes, pendingShot, setPendingShot 
   const lanes = useMemo(() => {
     if (myIds.length !== 5 || new Set(myIds).size !== 5) return null
     const synOf = (a, b) => pairSyn.get((a < b ? [a, b] : [b, a]).join('-')) ?? null
-    return resolveLanes(myIds, synOf, myIds.includes(pinnedMid) ? pinnedMid : null)
+    const pair = pinnedPair.length === 2 && pinnedPair.every((id) => myIds.includes(id))
+      ? pinnedPair : null
+    const mid = myIds.includes(pinnedMid) && !(pair && pair.includes(pinnedMid)) ? pinnedMid : null
+    // role tiebreaker for equal-synergy splits: supports belong in a duo lane
+    const midScore = (id) => {
+      const r = heroById[id]?.roles || []
+      return (r.includes('Carry') || r.includes('Nuker') ? 1 : 0) - (r.includes('Support') ? 2 : 0)
+    }
+    return resolveLanes(myIds, synOf, mid, pair, midScore)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(myIds), pairSyn, pinnedMid])
+  }, [JSON.stringify(myIds), pairSyn, pinnedMid, JSON.stringify(pinnedPair), heroById])
   const pinActive = lanes != null && pinnedMid === lanes.mid
+  const pairActive = lanes != null && pinnedPair.length === 2
+    && pinnedPair.every((id) => myIds.includes(id))
+
+  // pinning a hero mid pulls it out of the pair (and vice versa) — never both
+  const pinMid = (id) => { setPinnedMid(id); setPinnedPair((p) => p.filter((x) => x !== id)) }
+  const togglePair = (id) => {
+    if (pinnedMid === id) setPinnedMid(null)
+    setPinnedPair((p) => (p.includes(id) ? p.filter((x) => x !== id)
+      : p.length >= 2 ? [id] : [...p, id]))
+  }
 
   const setHero = (i, v) => setDraft((d) => d.map((x, j) => (j === i ? v : x)))
   const chooseSide = (s) => { setMySide(s); setFocusSlot(s === 'radiant' ? 0 : 5) }
@@ -591,18 +617,32 @@ function DraftTab({ meta, draft, setDraft, nHeroes, pendingShot, setPendingShot 
                     <div className="lane-heroes">
                       {ids.map((id) => {
                         const h = heroById[id]
+                        const inPair = pinnedPair.includes(id)
                         return (
                           <span key={id} className="lane-hero">
                             <i className="dot" style={{ background: ATTR_COLOR[h?.attr || '?'] }} />
                             {h?.name || `#${id}`}
                             {isMid && <span className={`mid-badge ${pinActive ? 'pinned' : ''}`}>
                               {pinActive ? 'mid · pinned' : 'mid'}</span>}
+                            {inPair && <span className={`pair-badge ${pairActive ? 'on' : ''}`}>
+                              {pairActive ? '🔗 paired' : '🔗 pick partner'}</span>}
                             {isMid ? (
                               pinActive && <button className="pin-btn" title="unpin — back to auto-resolved mid"
                                 onClick={() => setPinnedMid(null)}>✕ unpin</button>
                             ) : (
                               <button className="pin-btn" title="pin this hero to mid and re-pair the rest"
-                                onClick={() => setPinnedMid(id)}>pin mid</button>
+                                onClick={() => pinMid(id)}>pin mid</button>
+                            )}
+                            {inPair ? (
+                              <button className="pin-btn" title="unpair — back to auto-resolved lanes"
+                                onClick={() => togglePair(id)}>✕ unpair</button>
+                            ) : (
+                              <button className="pin-btn"
+                                title={pinnedPair.length === 1
+                                  ? `force a duo lane with ${heroById[pinnedPair[0]]?.name || 'partner'}`
+                                  : 'force this hero into a duo lane with a partner of your choice'}
+                                onClick={() => togglePair(id)}>
+                                {pinnedPair.length === 1 ? '+ pair' : 'pair'}</button>
                             )}
                           </span>
                         )
