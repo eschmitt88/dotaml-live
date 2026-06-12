@@ -26,6 +26,16 @@ async function del(path) {
   return r.json()
 }
 
+async function patchReq(path, body) {
+  const r = await fetch(path, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!r.ok) throw new Error(`${path} -> ${r.status} ${await r.text()}`)
+  return r.json()
+}
+
 export const api = {
   health: () => get('/health'),
   meta: () => get('/meta'),
@@ -49,6 +59,7 @@ export const api = {
   feedbackAudio: (blob) => postBlob('/api/feedback/audio', blob),
   feedbackAction: (id, action, body = {}) => post(`/api/feedback/${id}/${action}`, body),
   feedbackComment: (id, text) => post(`/api/feedback/${id}/comment`, { text }),
+  patchFeedbackTicket: (id, b) => patchReq(`/api/feedback/${id}/ticket`, b),
   feedbackCommentAudio: (id, blob) => postBlob(`/api/feedback/${id}/comment`, blob),
   feedbackLog: async (id) => {
     const r = await fetch(`/api/feedback/${id}/log`)

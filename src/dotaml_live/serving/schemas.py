@@ -3,6 +3,8 @@ integer IDs (the SPA resolves names via /meta)."""
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -45,6 +47,21 @@ class FeedbackTextReq(BaseModel):
 
 class FeedbackRejectReq(BaseModel):
     reason: str | None = None
+
+
+class FeedbackTicketPatchReq(BaseModel):
+    """Partial ticket edit — only the non-null fields are merged in."""
+    title: str | None = Field(None, max_length=80)
+    summary: str | None = None
+    details: str | None = None
+    area: Literal["frontend", "backend", "model", "pipeline", "other"] | None = None
+    acceptance: list[str] | None = None
+
+
+class FeedbackApproveReq(BaseModel):
+    """Per-ticket implementation overrides (null -> global default)."""
+    implement_model: Literal["sonnet", "opus", "haiku"] | None = None
+    implement_effort: Literal["low", "medium", "high"] | None = None
 
 
 class HeroCombosReq(BaseModel):

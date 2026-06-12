@@ -12,8 +12,12 @@ feedback:
                                     # cpu int8 does a 60s memo in seconds — fine here.
                                     # set "auto" to try cuda first.
   triage_model: "sonnet"            # claude -p model that writes tickets
-  implement_model: null             # null -> claude CLI default model
-  implement_timeout_minutes: 60
+  implement_model: null             # null -> claude CLI default model; the
+                                    # dashboard's Implementation defaults panel
+                                    # (data/settings.json) and per-ticket
+                                    # overrides take precedence over this
+  implement_timeout_minutes: 60     # used when no effort level is set; effort
+                                    # low/medium/high -> 30/60/180 min
   dev_ports: [8091, 8099]           # preview servers for implemented tickets
 
 # Default query knobs (overridable per request)
