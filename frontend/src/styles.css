@@ -178,6 +178,23 @@ nav.tabs button.on { color:var(--fg); border-color:var(--line); border-bottom-co
 .count { color:var(--mut); font-size:12px; white-space:nowrap; }
 .filter-btn { background:#0c1116; border:1px solid var(--line); color:var(--mut); padding:6px 12px; }
 .filter-btn.on { color:var(--blue); border-color:var(--blue); }
+/* hero picker + solo win-rate card */
+.disco-hero { display:flex; align-items:flex-start; gap:16px; margin-bottom:12px; flex-wrap:wrap; }
+.dh-pick { display:flex; align-items:center; gap:10px; min-width:260px; }
+.dh-lbl { color:var(--mut); font-size:13px; }
+.dh-pick .combo { flex:none; width:220px; }
+.hero-stat { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px 14px; min-width:300px; flex:1; max-width:480px; }
+.hs-head { display:flex; align-items:center; gap:8px; }
+.hs-name { font-weight:600; }
+.hs-sub { color:var(--mut); font-size:11px; margin-left:auto; }
+.hs-main { display:flex; align-items:center; gap:12px; margin-top:8px; }
+.hs-main b { font-size:22px; font-variant-numeric:tabular-nums; }
+.hs-bar { flex:1; height:10px; background:#0c1116; border:1px solid var(--line); border-radius:5px; overflow:hidden; }
+.hs-bar > div { height:100%; }
+.hs-bar > div.pos { background:var(--grn); } .hs-bar > div.neg { background:var(--org); }
+.hero-stat b.pos { color:var(--grn); } .hero-stat b.neg { color:var(--org); }
+.hs-sides { display:flex; gap:20px; margin-top:8px; color:var(--mut); font-size:12px; }
+.hs-sides b { color:var(--fg); font-variant-numeric:tabular-nums; }
 .disco-filters { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:12px 24px; align-items:end; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px 16px; margin-bottom:12px; }
 .rslider.off { opacity:.4; pointer-events:none; }
 .rs-head { display:flex; justify-content:space-between; gap:8px; font-size:12px; color:var(--mut); margin-bottom:4px; }

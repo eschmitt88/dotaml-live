@@ -795,7 +795,44 @@ function MinSlider({ label, min, max, value, format, disabled, onChange }) {
   )
 }
 
-function DiscoverTab({ onAdd }) {
+// solo baseline win rate for the picked hero (all other 9 slots masked, Radiant/Dire averaged)
+function HeroStatCard({ name, attr, stats }) {
+  const avg = stats?.win_rate_avg
+  return (
+    <div className="hero-stat">
+      <div className="hs-head">
+        <i className="dot" style={{ background: ATTR_COLOR[attr] || '#888' }} />
+        <span className="hs-name">{name}</span>
+        <span className="hs-sub">solo win rate · 9 slots masked, R/D averaged</span>
+      </div>
+      {stats?.loading && <p className="muted">computing…</p>}
+      {stats?.error && <span className="err inline">{stats.error}</span>}
+      {avg != null && (
+        <>
+          <div className="hs-main">
+            <b className={avg >= 0.5 ? 'pos' : 'neg'}>{(avg * 100).toFixed(1)}%</b>
+            <div className="hs-bar">
+              <div className={avg >= 0.5 ? 'pos' : 'neg'} style={{ width: `${avg * 100}%` }} />
+            </div>
+          </div>
+          <div className="hs-sides">
+            <span>Radiant <b>{(stats.win_rate_radiant * 100).toFixed(1)}%</b></span>
+            <span>Dire <b>{(stats.win_rate_dire * 100).toFixed(1)}%</b></span>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+function DiscoverTab({ onAdd, meta, nHeroes }) {
+  const heroes = useMemo(
+    () => [...meta.heroes].sort((a, b) => a.name.localeCompare(b.name)), [meta])
+  const heroById = useMemo(() => {
+    const m = {}; meta.heroes.forEach((h) => { m[h.id] = h }); return m
+  }, [meta])
+  const [hero, setHero] = useState(0)             // picked hero id (0 = none)
+  const [stats, setStats] = useState(null)        // {win_rate_*} | {loading} | {error}
   const [data, setData] = useState(null)
   const [err, setErr] = useState(null)
   const [q, setQ] = useState('')
@@ -818,8 +855,20 @@ function DiscoverTab({ onAdd }) {
   }
 
   useEffect(() => { api.combosTable().then(setData).catch((e) => setErr(String(e))) }, [])
-  useEffect(() => { setLimit(150) }, [size, q, sortKey, mins])
+  useEffect(() => { setLimit(150) }, [size, q, sortKey, mins, hero])
   useEffect(() => { setMins({}) }, [size])
+
+  // heroes past the model's vocabulary have no meaningful prediction — skip stats
+  const heroUnsupported = hero !== 0 && nHeroes != null && hero >= nHeroes
+  useEffect(() => {
+    if (!hero || heroUnsupported) { setStats(null); return }
+    let on = true
+    setStats({ loading: true })
+    api.heroStats(hero)
+      .then((r) => { if (on) setStats(r) })
+      .catch((e) => { if (on) setStats({ error: String(e) }) })
+    return () => { on = false }
+  }, [hero, heroUnsupported])
 
   const base = data ? (size === 'pairs' ? data.combos : data.trios) || [] : []
   const rows = useMemo(() => {
@@ -873,9 +922,10 @@ function DiscoverTab({ onAdd }) {
       if (mins[k] == null || mins[k] <= bounds[k][0]) continue
       r = r.filter((c) => c[k] != null && c[k] >= mins[k])
     }
+    if (hero) r = r.filter((c) => c.ids.includes(hero))
     if (needle) r = r.filter((c) => c.names.some((n) => n.toLowerCase().includes(needle)))
     return [...r].sort((x, y) => y[sortKey] - x[sortKey])
-  }, [rows, q, sortKey, mins, bounds])
+  }, [rows, q, sortKey, mins, bounds, hero])
 
   if (err) return <p className="err">{err}</p>
   if (!data) return <p>Loading combos…</p>
@@ -911,6 +961,15 @@ function DiscoverTab({ onAdd }) {
           ))}
         </div>
         <span className="count">showing {Math.min(limit, view.length)} of {view.length.toLocaleString()}</span>
+      </div>
+      <div className="disco-hero">
+        <div className="dh-pick">
+          <span className="dh-lbl">Hero</span>
+          <HeroCombo heroes={heroes} value={hero} onChange={setHero} nHeroes={nHeroes}
+            placeholder="— pick a hero —" onTabCommit={() => {}} />
+        </div>
+        {hero !== 0 && !heroUnsupported &&
+          <HeroStatCard name={heroById[hero]?.name} attr={heroById[hero]?.attr} stats={stats} />}
       </div>
       <div className="disco-filters">
         {METRIC_FILTERS.map(([k, label, fmt]) => (
@@ -1606,7 +1665,7 @@ export default function App() {
       </header>
       {tab === 'draft' && <DraftTab meta={meta} draft={draft} setDraft={setDraft} nHeroes={model?.n_heroes}
         pendingShot={pendingShot} setPendingShot={setPendingShot} />}
-      {tab === 'discover' && <DiscoverTab onAdd={addCombo} />}
+      {tab === 'discover' && <DiscoverTab onAdd={addCombo} meta={meta} nHeroes={model?.n_heroes} />}
       {tab === 'shots' && <ShotsTab onReview={reviewShot}
         heroById={Object.fromEntries(meta.heroes.map((h) => [h.id, h]))} />}
       {/* Feedback stays mounted (just hidden) so the composer survives tab switches */}

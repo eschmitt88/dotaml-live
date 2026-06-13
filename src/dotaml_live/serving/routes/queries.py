@@ -33,6 +33,22 @@ def winprob(req: DraftReq, request: Request):
             "predicted_duration_min": round(lm["predicted_duration_sec"] / 60.0, 1)}
 
 
+@router.get("/hero-stats/{hero_id}")
+def hero_stats(hero_id: int, request: Request):
+    """Solo baseline win rate for one hero: P(win) with only that hero filled in
+    and the other nine slots masked, averaged over the hero placed on Radiant vs
+    Dire. Mirrors the side-averaged win rate used in the Combo Discovery table."""
+    f = _model(request)
+    if hero_id < 1 or hero_id >= f.n_heroes:
+        raise HTTPException(404, f"hero {hero_id} not in the active model")
+    subset = [(hero_id,)]
+    rad = float(hc._radiant_winprob_batch(f, subset)[0])
+    dire = float(1.0 - hc._radiant_winprob_batch(f, subset, side="dire")[0])
+    return {"hero_id": hero_id, "hero_name": hero_name(hero_id),
+            "win_rate_radiant": rad, "win_rate_dire": dire,
+            "win_rate_avg": (rad + dire) / 2.0}
+
+
 @router.post("/hero-picks")
 def hero_picks(req: HeroPicksReq, request: Request):
     f = _model(request)
