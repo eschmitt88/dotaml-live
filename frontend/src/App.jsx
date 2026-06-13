@@ -798,6 +798,7 @@ function MinSlider({ label, min, max, value, format, disabled, onChange }) {
 // solo baseline win rate for the picked hero (all other 9 slots masked, Radiant/Dire averaged)
 function HeroStatCard({ name, attr, stats }) {
   const avg = stats?.win_rate_avg
+  const kpm = stats?.kills_per_min
   return (
     <div className="hero-stat">
       <div className="hs-head">
@@ -819,6 +820,12 @@ function HeroStatCard({ name, attr, stats }) {
             <span>Radiant <b>{(stats.win_rate_radiant * 100).toFixed(1)}%</b></span>
             <span>Dire <b>{(stats.win_rate_dire * 100).toFixed(1)}%</b></span>
           </div>
+          {kpm != null && Number.isFinite(kpm) && (
+            <div className="hs-kpm">
+              <span>kills+assists / min (solo baseline)</span>
+              <b>{kpm.toFixed(2)}</b>
+            </div>
+          )}
         </>
       )}
     </div>

@@ -44,9 +44,11 @@ def hero_stats(hero_id: int, request: Request):
     subset = [(hero_id,)]
     rad = float(hc._radiant_winprob_batch(f, subset)[0])
     dire = float(1.0 - hc._radiant_winprob_batch(f, subset, side="dire")[0])
+    kpm = queries.kills_per_minute_pair(f, hero_subset=[hero_id])
     return {"hero_id": hero_id, "hero_name": hero_name(hero_id),
             "win_rate_radiant": rad, "win_rate_dire": dire,
-            "win_rate_avg": (rad + dire) / 2.0}
+            "win_rate_avg": (rad + dire) / 2.0,
+            "kills_per_min": float(kpm.kills_per_min)}
 
 
 @router.post("/hero-picks")
