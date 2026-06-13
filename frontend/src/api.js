@@ -51,6 +51,7 @@ export const api = {
   winVsDuration: (b) => post('/api/win-vs-duration', b),
   itemBuild: (b) => post('/api/item-build', b),
   heroCombos: (b) => post('/api/hero-combos', b),
+  heroStats: (id) => get(`/api/hero-stats/${id}`),
   combosTable: () => get('/api/combos-table'),
   explainCombo: (b) => post('/api/combos/explain', b),
   patchStatus: () => get('/api/patch-status'),
