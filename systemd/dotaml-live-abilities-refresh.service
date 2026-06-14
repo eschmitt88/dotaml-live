@@ -1,0 +1,20 @@
+# Weekly refresh of hero_abilities.json from the OpenDota constants API.
+# Feeds the combo-discovery "explain" prompt (lookups.hero_id_to_abilities).
+# Low-churn — only changes on a new hero or an ability rework — so weekly, not
+# nightly (the docstring's "nightly cron" was an upper bound, not a requirement).
+# Install (user units):
+#   ln -s ~/projects/dotaml-live/systemd/dotaml-live-abilities-refresh.{service,timer} ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now dotaml-live-abilities-refresh.timer
+[Unit]
+Description=dotaml-live hero-abilities refresh (OpenDota constants -> hero_abilities.json)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/mnt/projects/dotaml-live
+ExecStart=/mnt/projects/dotaml-live/.venv/bin/python -u -m dotaml_live.queries._refresh_hero_abilities
+Environment=PYTHONUNBUFFERED=1
+# Network fetch; bail rather than hang if OpenDota is unresponsive. On failure
+# the prior hero_abilities.json is kept (the script writes atomically/last).
+TimeoutStartSec=10min

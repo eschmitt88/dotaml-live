@@ -1,0 +1,12 @@
+[Unit]
+Description=Weekly dotaml-live hero-abilities refresh (Sundays, before the weekly retrain)
+
+[Timer]
+# Sunday 03:30 — ahead of the 04:00 weekly from-scratch retrain.
+OnCalendar=Sun *-*-* 03:30:00
+# Catch up if the machine was off at the scheduled time.
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
