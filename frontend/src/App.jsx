@@ -345,6 +345,13 @@ function PinIcon({ filled }) {
   )
 }
 
+function CurveTooltip({ active, payload, label }) {
+  if (!active || !payload || !payload.length) return null
+  return (
+    <div className="curve-tip">{label}m → {(payload[0].value * 100).toFixed(1)}%</div>
+  )
+}
+
 function DraftTab({ meta, draft, setDraft, nHeroes, pendingShot, setPendingShot }) {
   const heroes = useMemo(
     () => [...meta.heroes].sort((a, b) => a.name.localeCompare(b.name)), [meta])
@@ -707,14 +714,14 @@ function DraftTab({ meta, draft, setDraft, nHeroes, pendingShot, setPendingShot 
             ) : <p className="muted">—</p>}
           </Card>
 
-          <Card className="curve" title="Win vs. duration">
+          <Card className="curve" title="Radiant win vs. duration">
             {curve ? (
               <ResponsiveContainer width="100%" height={160}>
                 <LineChart data={curve} margin={{ top: 6, right: 12, bottom: 0, left: -20 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#2a3340" />
                   <XAxis dataKey="minute" unit="m" tick={{ fontSize: 11 }} />
                   <YAxis domain={[0, 1]} ticks={[0, 0.5, 1]} tick={{ fontSize: 11 }} tickFormatter={(v) => v.toFixed(1)} />
-                  <Tooltip formatter={(v) => (v * 100).toFixed(1) + '%'} />
+                  <Tooltip cursor={{ stroke: '#2a3340' }} content={<CurveTooltip />} />
                   <ReferenceLine y={0.5} stroke="#c9d4e0" strokeDasharray="6 3" />
                   <Line type="monotone" dataKey="win" stroke="#16a34a" strokeWidth={2} dot={false} />
                 </LineChart>
