@@ -154,6 +154,7 @@ input, select { background:#0c1116; color:var(--fg); border:1px solid var(--line
 .wp-nums .grn { color:var(--grn); font-weight:700; font-size:18px; }
 .wp-nums .org { color:var(--org); font-weight:700; font-size:18px; }
 .wp-nums .dur { color:var(--mut); }
+.curve-tip { background:#0c1116; border:1px solid var(--line); border-radius:5px; padding:2px 6px; font-size:11px; color:var(--fg); white-space:nowrap; line-height:1.4; }
 
 /* item build — no fixed height, no scrollbar */
 .inv { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px; }
