@@ -739,7 +739,16 @@ function DraftTab({ meta, draft, setDraft, nHeroes, pendingShot, setPendingShot 
               <div className="inv">
                 {out.build.final_inventory.map((it) => <span key={it.item_id} className="chip">{it.item_name}</span>)}
               </div>
-              <pre className="plan">{out.build.pretty}</pre>
+              <div className="plan">
+                {out.build.actions.map((a, i) => (
+                  <div key={i} className="plan-row" style={a.kind === 'sell' ? { color: '#c8943a' } : undefined}>
+                    <span className="plan-min">{a.minute}m</span>
+                    <span className="plan-kind">{a.kind}</span>
+                    <span className="plan-item">{a.item_name}</span>
+                    <span className="plan-gold">({a.gold_delta >= 0 ? '+' : ''}{a.gold_delta}g)</span>
+                  </div>
+                ))}
+              </div>
             </div>
           ) : <p className="muted">—</p>}
         </Card>
