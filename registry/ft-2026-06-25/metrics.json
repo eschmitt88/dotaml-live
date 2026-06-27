@@ -1,0 +1,17 @@
+{
+  "val_auc_pure_pregame": 0.6531826163678904,
+  "final_probe_results": {
+    "pure_pregame": 0.6538924110112436,
+    "partial_draft": 0.02232,
+    "duration_cond": 0.688123066628898,
+    "items_cond": 0.9893486168135693,
+    "outcome_cond": 0.3715446889400482,
+    "partial_items": 0.06580243782222182,
+    "kills_pair_probe": 0.5032658576965332,
+    "gpm_probe": 0.07424656301736832,
+    "hd_probe": 0.04717600345611572
+  },
+  "epochs": 3,
+  "train_cutoff": "2026-06-18",
+  "warm_started_from": "ft-2026-06-20"
+}

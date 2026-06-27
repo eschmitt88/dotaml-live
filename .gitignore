@@ -7,12 +7,16 @@ __pycache__/
 # uv
 # (uv.lock IS tracked)
 
-# Data + model artifacts live on the SN850X / DVC, not git
+# Data + model artifacts live on the SN850X / DVC, not git.
+# Git tracks only per-run METADATA (config.yaml, metrics.json, item_vocab.json,
+# manifest.json) + the registry pointer — the audit trail. The carried-forward
+# served artifacts (registry.ARTIFACTS) are derived/regenerable and stay out:
 /data/
 /registry/**/model.pt
 /registry/**/*.parquet
 /registry/**/*.npz
 /registry/**/*.npy
+/registry/**/hero_combos.json
 
 # Frontend build
 /frontend/node_modules/
