@@ -4,6 +4,17 @@ port: 8090
 reload_poll_seconds: 30   # how often model_loader checks the registry 'live' pointer
 device: "auto"            # auto -> cuda if available else cpu
 
+# TLS — serve HTTPS so the LAN origin is a secure context (mic capture works
+# without the chrome insecure-origin flag). Paths are relative to the repo root.
+# Cert is a local-CA-signed leaf for aiserver2026 (SAN covers the LAN/Tailscale
+# IPs + localhost); import certs/rootCA.pem into each client's trust store once.
+# Comment both out to fall back to plain HTTP.
+# Absolute paths so dev-preview worktrees (which don't carry the gitignored
+# certs/ dir) resolve the same cert as the main service.
+tls:
+  certfile: "/mnt/projects/dotaml-live/certs/aiserver2026.pem"
+  keyfile: "/mnt/projects/dotaml-live/certs/aiserver2026-key.pem"
+
 # Feedback queue: voice/text → claude triage → approved ticket → claude
 # implements in a worktree → dev preview server → accept merges to master.
 feedback:

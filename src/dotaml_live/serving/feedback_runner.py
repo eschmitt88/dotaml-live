@@ -30,6 +30,7 @@ import os
 import re
 import shutil
 import socket
+import ssl
 import subprocess
 import sys
 import time
@@ -510,8 +511,14 @@ def _start_dev_server(fid: str, wt: Path, prefer_port: int | None = None) -> dic
     taken = {(m.get("dev") or {}).get("port") for m in store.list_items()}
     port = _free_port({p for p in taken if p}, prefer=prefer_port)
     unit = f"dotaml-feedback-dev-{fid}"
+    # Share the main service's TLS cert so the dev preview is a secure context
+    # too (mic capture). Paths are resolved here (main checkout) and embedded
+    # literally — the worktree never carries the gitignored certs/ dir.
+    from .app import tls_kwargs
+    ssl_kw = tls_kwargs(config.serving_config())
+    ssl_args = "".join(f", {k}={v!r}" for k, v in ssl_kw.items())
     boot = ("import uvicorn; from dotaml_live.serving.app import create_app; "
-            f"uvicorn.run(create_app(), host='0.0.0.0', port={port})")
+            f"uvicorn.run(create_app(), host='0.0.0.0', port={port}{ssl_args})")
     cmd = ["systemd-run", "--user", "--collect", f"--unit={unit}",
            f"--working-directory={wt}",
            f"--setenv=PYTHONPATH={wt}/src",
@@ -520,10 +527,13 @@ def _start_dev_server(fid: str, wt: Path, prefer_port: int | None = None) -> dic
            "--setenv=DOTAML_DEV_PREVIEW=1",
            sys.executable, "-c", boot]
     subprocess.run(cmd, check=True, capture_output=True, timeout=15)
+    scheme = "https" if ssl_kw else "http"
+    # loopback to a cert whose CA the server doesn't trust → skip verification
+    ctx = ssl._create_unverified_context() if ssl_kw else None
     deadline = time.monotonic() + 180          # model load can take a while
     while time.monotonic() < deadline:
         try:
-            with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=2):
+            with urllib.request.urlopen(f"{scheme}://127.0.0.1:{port}/health", timeout=2, context=ctx):
                 return {"port": port, "unit": unit}
         except OSError:
             time.sleep(2)

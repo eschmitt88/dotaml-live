@@ -1353,7 +1353,7 @@ function FeedbackItem({ item, onChanged, onErr, preview, defaults }) {
   const effModel = model !== undefined ? model : (defaults?.implement_model || '')
   const effEffort = effort !== undefined ? effort : (defaults?.implement_effort || '')
   const devUrl = item.status === 'implemented' && item.dev
-    ? `http://${window.location.hostname}:${item.dev.port}/` : null
+    ? `${window.location.protocol}//${window.location.hostname}:${item.dev.port}/` : null
   const conflicted = item.merge_probe && !item.merge_probe.clean
 
   const act = async (action, fn) => {
@@ -1378,7 +1378,7 @@ function FeedbackItem({ item, onChanged, onErr, preview, defaults }) {
 
       <div className="fb-actions" onClick={(e) => e.stopPropagation()}>
         {preview && ['triaged', 'implemented', 'failed'].includes(item.status) &&
-          <a className="muted" href={`http://${location.hostname}:8090/`}>
+          <a className="muted" href={`${location.protocol}//${location.hostname}:8090/`}>
             testing copy — approve / accept / re-implement from the main dashboard ⧉</a>}
         {!preview && <>
           {item.status === 'triaged' && <>
@@ -1536,7 +1536,7 @@ function FeedbackTab({ recorder }) {
       </div>
       {preview && <p className="fb-previewbanner">⚠ Dev preview — test the change and leave
         comments here; approve / accept / re-implement / discard happen on
-        the <a href={`http://${location.hostname}:8090/`}>main dashboard</a>.</p>}
+        the <a href={`${location.protocol}//${location.hostname}:8090/`}>main dashboard</a>.</p>}
       <FeedbackComposer onSubmitted={load} recorder={recorder} />
       {!preview && <ImplDefaults defaults={settings} onSave={saveDefaults} />}
       {err && <p className="err">{err}</p>}

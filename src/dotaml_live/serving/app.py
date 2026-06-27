@@ -64,10 +64,28 @@ def create_app() -> FastAPI:
     return app
 
 
+def tls_kwargs(cfg: dict) -> dict:
+    """uvicorn ssl_* kwargs if a usable cert+key are configured, else {} (HTTP).
+
+    Relative cert paths resolve against the repo root so the dev-preview
+    instances (which run from worktrees) share the main checkout's cert.
+    """
+    tls = cfg.get("tls") or {}
+    cert, key = tls.get("certfile"), tls.get("keyfile")
+    if not (cert and key):
+        return {}
+    cert_p = Path(cert) if os.path.isabs(cert) else paths.REPO_ROOT / cert
+    key_p = Path(key) if os.path.isabs(key) else paths.REPO_ROOT / key
+    if cert_p.exists() and key_p.exists():
+        return {"ssl_certfile": str(cert_p), "ssl_keyfile": str(key_p)}
+    return {}
+
+
 def main() -> None:
     import uvicorn
     cfg = config.serving_config()
-    uvicorn.run(create_app(), host=cfg.get("host", "0.0.0.0"), port=int(cfg.get("port", 8090)))
+    uvicorn.run(create_app(), host=cfg.get("host", "0.0.0.0"),
+                port=int(cfg.get("port", 8090)), **tls_kwargs(cfg))
 
 
 if __name__ == "__main__":

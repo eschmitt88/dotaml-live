@@ -25,3 +25,6 @@ __pycache__/
 # Local env
 .env
 *.log
+
+# TLS material — private keys never go in git (rootCA.pem is shared out-of-band)
+/certs/
