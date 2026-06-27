@@ -241,6 +241,46 @@ def _finetune(cfg: dict, incumbent_ver: str | None, pq, candidate_ver: str,
         return None
 
 
+def _git_sync(out: dict) -> None:
+    """Commit the registry metadata this cycle produced and push it.
+
+    The heavy artifacts (model.pt, *.parquet, *.npz, *.npy, hero_combos.json) are
+    gitignored — only the per-run config/metrics/manifest + the registry pointer
+    are tracked, so this commit IS the durable audit trail (it survives the
+    keep_last_n prune that deletes the on-disk dir). Scoped to registry/ so it
+    never sweeps unrelated working-tree edits. Best-effort: a git/network failure
+    is logged and left for the next cycle to catch up — it never fails the run.
+    """
+    import subprocess
+    root = str(paths.REPO_ROOT)
+
+    def git(*a, check=True):
+        return subprocess.run(["git", "-C", root, *a],
+                              check=check, capture_output=True, text=True)
+    try:
+        git("add", "-A", "registry/")
+        # monitor-only / no-data / train-skipped cycles leave registry/ untouched
+        if git("diff", "--cached", "--quiet", "--", "registry/", check=False).returncode == 0:
+            print("[retrain] git: registry unchanged, nothing to commit")
+            return
+        bits = [f"status={out.get('status', '?')}"]
+        if out.get("candidate"):
+            bits.append(str(out["candidate"]))
+        if "promote" in out:
+            bits.append(f"promote={out['promote']}")
+        if out.get("candidate_eval_auc") is not None:
+            bits.append(f"cand_auc={out['candidate_eval_auc']}")
+        if out.get("incumbent_eval_auc") is not None:
+            bits.append(f"inc_auc={out['incumbent_eval_auc']}")
+        msg = "registry: cycle " + " ".join(bits)
+        git("commit", "-m", msg)
+        git("push")
+        print(f"[retrain] git: committed + pushed :: {msg}")
+    except subprocess.CalledProcessError as e:
+        detail = (e.stderr or e.stdout or str(e)).strip()
+        print(f"[retrain] git sync failed (left for next cycle): {' '.join(e.cmd)} -> {detail}")
+
+
 def _load_probes(model_dir: Path) -> dict:
     m = model_dir / "metrics.json"
     if m.exists():
@@ -273,6 +313,7 @@ def main() -> None:
                     train=not args.no_train, update_data=not args.no_update,
                     from_scratch=args.weekly, force_promote=args.force_promote)
     print(f"[retrain] cycle: {out}")
+    _git_sync(out)
 
 
 if __name__ == "__main__":
