@@ -1561,6 +1561,155 @@ function FeedbackTab({ recorder }) {
   )
 }
 
+// ---------------- Training metrics tab ----------------
+
+const PROBE_LABELS = {
+  pure_pregame: 'Pregame AUC', duration_cond: 'Duration', items_cond: 'Items',
+  outcome_cond: 'Outcome', kills_pair_probe: 'Kills pair', gpm_probe: 'GPM', hd_probe: 'Hero dmg',
+}
+const shortVer = (v) => (v ? v.replace(/^[a-z]+-/, '') : '')
+
+function PrequentialTip({ active, payload }) {
+  if (!active || !payload?.length) return null
+  const p = payload[0].payload
+  return (
+    <div className="curve-tip">
+      <b>{p.cycle}</b> · AUC {p.eval_auc?.toFixed(4)}<br />
+      <span className="muted">live {p.version} · {p.n_days}d window</span>
+    </div>
+  )
+}
+
+function TrainingTab() {
+  const [data, setData] = useState(null)
+  const [err, setErr] = useState(null)
+  const [sel, setSel] = useState(null)   // selected run version for the probe panel
+
+  useEffect(() => { api.trainingHistory().then(setData).catch((e) => setErr(String(e))) }, [])
+
+  const pq = data?.prequential || []
+  const runs = useMemo(() => [...(data?.runs || [])].reverse(), [data])   // newest first
+  const promoSet = useMemo(() => new Set((data?.promotions || []).map((p) => p.version)), [data])
+  const selRun = runs.find((r) => r.version === sel)
+    || runs.find((r) => r.version === data?.live) || runs[0]
+
+  // snap each promotion onto an actual prequential x value (categorical axis needs an exact tick)
+  const promoLines = useMemo(() => {
+    const cycles = pq.map((p) => p.cycle)
+    const seen = new Set()
+    return (data?.promotions || []).map((p) => {
+      const x = cycles.find((c) => c >= p.date)
+      if (!x || seen.has(x)) return null
+      seen.add(x)
+      return { x, version: p.version }
+    }).filter(Boolean)
+  }, [data, pq])
+
+  const yDomain = useMemo(() => {
+    const a = pq.map((p) => p.eval_auc).filter((v) => v != null)
+    if (!a.length) return [0.5, 0.7]
+    const lo = Math.min(...a), hi = Math.max(...a), pad = (hi - lo) * 0.18 || 0.01
+    return [lo - pad, hi + pad]
+  }, [pq])
+
+  if (err) return <p className="err">{err}</p>
+  if (!data) return <p>Loading training history…</p>
+
+  const onDisk = runs.filter((r) => r.on_disk).length
+  const fromGit = runs.length - onDisk
+
+  return (
+    <section className="training">
+      <div className="disco-head">
+        <div>
+          <h2>Training metrics &amp; model progression</h2>
+          <p className="sub">Prequential health — the live model's lag-free AUC on the freshest unseen
+            window — across {pq.length} nightly cycles, plus validation metrics for every model version
+            ever trained: <b>{runs.length} runs</b> ({onDisk} on disk{fromGit ? `, ${fromGit} recovered from git history` : ''}).</p>
+        </div>
+      </div>
+
+      <Card title="Prequential AUC over time"
+        sub="each point = one nightly cycle scoring the live model on new, unseen days (▲ = a promotion)">
+        {pq.length ? (
+          <ResponsiveContainer width="100%" height={280}>
+            <LineChart data={pq} margin={{ top: 14, right: 18, bottom: 4, left: -8 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#2a3340" />
+              <XAxis dataKey="cycle" tick={{ fontSize: 11 }} minTickGap={26} />
+              <YAxis domain={yDomain} tick={{ fontSize: 11 }} tickFormatter={(v) => v.toFixed(3)} />
+              <Tooltip content={<PrequentialTip />} cursor={{ stroke: '#2a3340' }} />
+              {promoLines.map((p) => (
+                <ReferenceLine key={p.x} x={p.x} stroke="#16a34a" strokeDasharray="4 3"
+                  label={{ value: `▲ ${shortVer(p.version)}`, fontSize: 9, fill: '#16a34a', position: 'top' }} />
+              ))}
+              <Line type="monotone" dataKey="eval_auc" stroke="#3b82f6" strokeWidth={2}
+                dot={{ r: 2 }} activeDot={{ r: 4 }} />
+            </LineChart>
+          </ResponsiveContainer>
+        ) : <p className="muted">No prequential log yet — it fills in as nightly cycles run.</p>}
+      </Card>
+
+      <div className="train-grid">
+        <Card title="Model versions" sub={`${runs.length} runs · newest first · click to inspect probes`}>
+          <div className="train-runs-wrap">
+            <table className="combos train-runs">
+              <thead><tr>
+                <th>Version</th><th>Kind</th><th>Val AUC</th><th>Ep</th><th>Train ≤</th><th>From</th>
+              </tr></thead>
+              <tbody>
+                {runs.map((r) => (
+                  <tr key={r.version}
+                    className={`${r.version === data.live ? 'is-live' : ''} ${r.version === selRun?.version ? 'sel' : ''}`}
+                    onClick={() => setSel(r.version)}>
+                    <td className="combo">
+                      <span className="tv-name">{r.version}</span>
+                      {r.version === data.live && <span className="badge live">live</span>}
+                      {promoSet.has(r.version) && r.version !== data.live &&
+                        <span className="badge promo" title="was promoted to live">▲</span>}
+                      {!r.on_disk && <span className="badge git" title="pruned from disk — recovered from git history">git</span>}
+                    </td>
+                    <td className="tk">{r.kind}</td>
+                    <td className="stat">{r.val_auc != null ? r.val_auc.toFixed(4) : '—'}</td>
+                    <td className="stat">{r.epochs ?? '—'}</td>
+                    <td className="stat">{r.train_cutoff ?? '—'}</td>
+                    <td className="stat parent">{r.parent ? shortVer(r.parent) : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+
+        <Card title={selRun ? `Probes · ${selRun.version}` : 'Probes'}
+          sub="held-out diagnostic heads for the selected run">
+          {selRun ? (
+            <>
+              <div className="probe-headline">
+                <span>Validation AUC</span>
+                <b>{selRun.val_auc != null ? selRun.val_auc.toFixed(4) : '—'}</b>
+              </div>
+              <div className="probe-grid">
+                {Object.entries(PROBE_LABELS).map(([k, label]) => {
+                  const v = selRun.probes?.[k]
+                  if (v == null) return null
+                  return (
+                    <div key={k} className="probe-cell">
+                      <span className="probe-k">{label}</span>
+                      <b>{v.toFixed(3)}</b>
+                    </div>
+                  )
+                })}
+              </div>
+              {!Object.keys(selRun.probes || {}).length &&
+                <p className="muted">No probe metrics recorded for this run.</p>}
+            </>
+          ) : <p className="muted">Select a run to see its probe metrics.</p>}
+        </Card>
+      </div>
+    </section>
+  )
+}
+
 // ---------------- App shell ----------------
 
 export default function App() {
@@ -1675,6 +1824,7 @@ export default function App() {
           <button className={tab === 'draft' ? 'on' : ''} onClick={() => setTab('draft')}>Draft analysis</button>
           <button className={tab === 'discover' ? 'on' : ''} onClick={() => setTab('discover')}>Combo discovery</button>
           <button className={tab === 'shots' ? 'on' : ''} onClick={() => setTab('shots')}>Screenshots</button>
+          <button className={tab === 'training' ? 'on' : ''} onClick={() => setTab('training')}>Training</button>
           <button className={tab === 'feedback' ? 'on' : ''} onClick={() => setTab('feedback')}>
             Feedback{rec && <span className="rec-live-dot" title="recording in progress" />}
             {fbCount > 0 && <span className="fb-badge">{fbCount}</span>}
@@ -1691,6 +1841,7 @@ export default function App() {
       {tab === 'discover' && <DiscoverTab onAdd={addCombo} meta={meta} nHeroes={model?.n_heroes} />}
       {tab === 'shots' && <ShotsTab onReview={reviewShot}
         heroById={Object.fromEntries(meta.heroes.map((h) => [h.id, h]))} />}
+      {tab === 'training' && <TrainingTab />}
       {/* Feedback stays mounted (just hidden) so the composer survives tab switches */}
       <div style={tab === 'feedback' ? undefined : { display: 'none' }}>
         <FeedbackTab recorder={recorder} />

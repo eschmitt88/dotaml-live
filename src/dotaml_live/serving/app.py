@@ -18,6 +18,7 @@ from ..queries.lookups import (hero_id_to_name, hero_id_to_attr, hero_id_to_role
 from .model_loader import ModelHolder
 from .routes import feedback as feedback_routes
 from .routes import queries as queries_routes
+from .routes import training as training_routes
 
 
 @lru_cache(maxsize=1)
@@ -41,6 +42,7 @@ def create_app() -> FastAPI:
     app.state.model = ModelHolder(device_cfg=cfg.get("device", "auto"))
     app.include_router(queries_routes.router)
     app.include_router(feedback_routes.router)
+    app.include_router(training_routes.router)
 
     @app.get("/health")
     def health():

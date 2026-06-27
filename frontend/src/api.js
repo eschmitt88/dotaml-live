@@ -53,6 +53,7 @@ export const api = {
   heroCombos: (b) => post('/api/hero-combos', b),
   heroStats: (id) => get(`/api/hero-stats/${id}`),
   combosTable: () => get('/api/combos-table'),
+  trainingHistory: () => get('/api/training-history'),
   explainCombo: (b) => post('/api/combos/explain', b),
   patchStatus: () => get('/api/patch-status'),
   feedback: () => get('/api/feedback'),
