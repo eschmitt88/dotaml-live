@@ -66,6 +66,18 @@ def write_manifest(version: str, manifest: Manifest) -> None:
     (version_dir(version) / "manifest.json").write_text(json.dumps(asdict(manifest), indent=2))
 
 
+def read_manifest(version: str) -> dict | None:
+    """The version's durable record (parent, created, train_window, promoted,
+    notes), or None if it predates manifest-writing."""
+    p = version_dir(version) / "manifest.json"
+    if p.exists():
+        try:
+            return json.loads(p.read_text())
+        except (json.JSONDecodeError, OSError):
+            return None
+    return None
+
+
 def register(version: str) -> None:
     """Record a version (without promoting it)."""
     st = _read()

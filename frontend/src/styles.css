@@ -392,6 +392,8 @@ table.train-runs td.parent { color:var(--mut); }
   padding:4px 2px 12px; border-bottom:1px solid var(--line); margin-bottom:12px; }
 .probe-headline span { color:var(--mut); font-size:12px; text-transform:uppercase; letter-spacing:.05em; }
 .probe-headline b { font-size:22px; color:var(--blue); font-variant-numeric:tabular-nums; }
+.probe-meta { display:flex; flex-wrap:wrap; gap:6px 12px; margin:-4px 0 12px; color:var(--mut); font-size:12px; }
+.probe-meta .probe-note { color:#e8c35a; }
 .probe-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
 .probe-cell { display:flex; align-items:baseline; justify-content:space-between;
   background:#0c1116; border:1px solid var(--line); border-radius:6px; padding:6px 10px; }

@@ -1589,7 +1589,6 @@ function TrainingTab() {
 
   const pq = data?.prequential || []
   const runs = useMemo(() => [...(data?.runs || [])].reverse(), [data])   // newest first
-  const promoSet = useMemo(() => new Set((data?.promotions || []).map((p) => p.version)), [data])
   const selRun = runs.find((r) => r.version === sel)
     || runs.find((r) => r.version === data?.live) || runs[0]
 
@@ -1662,9 +1661,11 @@ function TrainingTab() {
                     className={`${r.version === data.live ? 'is-live' : ''} ${r.version === selRun?.version ? 'sel' : ''}`}
                     onClick={() => setSel(r.version)}>
                     <td className="combo">
-                      <span className="tv-name">{r.version}</span>
+                      <span className="tv-name"
+                        title={[r.created && `trained ${r.created}`, r.notes].filter(Boolean).join(' · ')}>
+                        {r.version}</span>
                       {r.version === data.live && <span className="badge live">live</span>}
-                      {promoSet.has(r.version) && r.version !== data.live &&
+                      {r.promoted && r.version !== data.live &&
                         <span className="badge promo" title="was promoted to live">▲</span>}
                       {!r.on_disk && <span className="badge git" title="pruned from disk — recovered from git history">git</span>}
                     </td>
@@ -1687,6 +1688,11 @@ function TrainingTab() {
               <div className="probe-headline">
                 <span>Validation AUC</span>
                 <b>{selRun.val_auc != null ? selRun.val_auc.toFixed(4) : '—'}</b>
+              </div>
+              <div className="probe-meta">
+                <span>{selRun.kind}{selRun.parent ? ` · from ${shortVer(selRun.parent)}` : ''}</span>
+                {selRun.created && <span title={selRun.created}>trained {selRun.created.slice(0, 10)}</span>}
+                {selRun.notes && <span className="probe-note">{selRun.notes}</span>}
               </div>
               <div className="probe-grid">
                 {Object.entries(PROBE_LABELS).map(([k, label]) => {

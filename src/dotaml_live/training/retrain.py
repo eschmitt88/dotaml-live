@@ -140,7 +140,7 @@ def run_cycle(now: str | None = None, timestamp: str = "", train: bool = True,
     # 6. promote -> refit-for-serving through `now` (kill the lag) -> regen combos -> prune
     if do_promote:
         if config.splits_policy()["prequential"].get("refit_for_serving", True):
-            _refit_for_serving(candidate_ver, now)
+            _refit_for_serving(candidate_ver, now, timestamp)
         registry.set_live(candidate_ver)
         _regen_combos(candidate_ver)        # discovery table is model-specific
         registry.prune(_keep_last_n())
@@ -191,7 +191,7 @@ def _regen_combos(version: str) -> None:
         print(f"[retrain] combos regen failed ({e}); discovery tab keeps carried-forward table")
 
 
-def _refit_for_serving(candidate_ver: str, now: str) -> None:
+def _refit_for_serving(candidate_ver: str, now: str, timestamp: str = "") -> None:
     """After the gate passes, fine-tune the candidate the rest of the way through `now`
     (fold in the eval days) so the served model has ~0 lag — extends the same version."""
     from . import finetune
@@ -200,7 +200,8 @@ def _refit_for_serving(candidate_ver: str, now: str) -> None:
         finetune.run_finetune(registry.version_dir(candidate_ver), candidate_ver,
                               train_cutoff=now, eval_dates=[now],
                               epochs=max(1, int(ft.get("epochs", 3)) // 2),
-                              n_train_rows=int(ft.get("train_rows", 1_500_000)))
+                              n_train_rows=int(ft.get("train_rows", 1_500_000)),
+                              created=timestamp)
         print(f"[retrain] refit-for-serving: {candidate_ver} extended through {now}")
     except Exception as e:  # noqa: BLE001
         print(f"[retrain] refit-for-serving failed ({e}); gated checkpoint serves as-is")
@@ -232,7 +233,7 @@ def _finetune(cfg: dict, incumbent_ver: str | None, pq, candidate_ver: str,
         finetune.run_finetune(registry.version_dir(incumbent_ver), candidate_ver,
                               train_cutoff=pq.train_cutoff, eval_dates=pq.eval_dates(),
                               epochs=epochs, n_train_rows=rows, lr=lr, warmup_steps=warmup,
-                              warm_start=not from_scratch)
+                              warm_start=not from_scratch, created=timestamp)
         return candidate_ver
     except Exception as e:  # noqa: BLE001
         import traceback
@@ -309,7 +310,11 @@ def main() -> None:
                     help="promote the candidate even if the AUC gate declines (manual "
                          "override for coverage changes the gate can't see, e.g. a new hero)")
     args = ap.parse_args()
-    out = run_cycle(now=args.now, timestamp=args.timestamp,
+    # main() is the composition root — resolve a real wall-clock stamp here (the
+    # systemd units don't pass --timestamp) so each manifest records when it was
+    # trained. Downstream stays pure/testable: it receives the stamp as data.
+    timestamp = args.timestamp or dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+    out = run_cycle(now=args.now, timestamp=timestamp,
                     train=not args.no_train, update_data=not args.no_update,
                     from_scratch=args.weekly, force_promote=args.force_promote)
     print(f"[retrain] cycle: {out}")

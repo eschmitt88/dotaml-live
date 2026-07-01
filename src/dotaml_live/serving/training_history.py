@@ -57,9 +57,11 @@ def _kind(v: str) -> str:
     return {"ft": "fine-tune", "fs": "from-scratch"}.get(pre, pre)
 
 
-def _parse_metrics(version: str, raw: str, on_disk: bool) -> dict:
+def _parse_metrics(version: str, raw: str, on_disk: bool,
+                   manifest: dict | None, promoted_in_git: bool) -> dict:
     m = json.loads(raw)
     probes = m.get("final_probe_results", {}) or {}
+    man = manifest or {}
     return {
         "version": version,
         "date": _version_date(version),
@@ -67,8 +69,13 @@ def _parse_metrics(version: str, raw: str, on_disk: bool) -> dict:
         "val_auc": m.get("val_auc_pure_pregame"),
         "epochs": m.get("epochs"),
         "train_cutoff": m.get("train_cutoff"),
-        "parent": m.get("warm_started_from"),
+        "parent": man.get("parent") or m.get("warm_started_from"),
         "probes": {k: probes[k] for k in PROBE_KEYS if k in probes},
+        # manifest is authoritative once present; git-history promotion is the
+        # backfill for runs trained before manifests were written.
+        "promoted": bool(man.get("promoted")) or promoted_in_git,
+        "created": man.get("created") or None,
+        "notes": man.get("notes") or "",
         "on_disk": on_disk,
     }
 
@@ -162,28 +169,42 @@ def _current_live() -> str | None:
     return None
 
 
+def _git_show(sha: str, path: str) -> str | None:
+    try:
+        return _git("show", f"{sha}:{path}")
+    except Exception:        # noqa: BLE001 — path absent at that commit
+        return None
+
+
 @lru_cache(maxsize=4)
 def _history_cached(cache_key: str) -> dict:
     # cache_key (HEAD sha + prequential mtime) only invalidates the cache; the
     # reads below always reflect the current working tree.
     disk = _disk_versions()
     git_versions = _git_metrics_versions()
+    promotions = _promotions()
+    promoted_versions = {p["version"] for p in promotions}
     runs = []
     for v in sorted(disk | set(git_versions)):
         try:
             if v in disk:
                 raw = (paths.REGISTRY_DIR / v / "metrics.json").read_text()
-                runs.append(_parse_metrics(v, raw, on_disk=True))
+                man_raw = (paths.REGISTRY_DIR / v / "manifest.json")
+                man = json.loads(man_raw.read_text()) if man_raw.exists() else None
             else:
-                raw = _git("show", f"{git_versions[v]}:registry/{v}/metrics.json")
-                runs.append(_parse_metrics(v, raw, on_disk=False))
+                raw = _git_show(git_versions[v], f"registry/{v}/metrics.json")
+                if raw is None:
+                    continue
+                mr = _git_show(git_versions[v], f"registry/{v}/manifest.json")
+                man = json.loads(mr) if mr else None
+            runs.append(_parse_metrics(v, raw, v in disk, man, v in promoted_versions))
         except Exception:    # noqa: BLE001 — skip an unreadable/corrupt run
             continue
     runs.sort(key=lambda r: (r["date"], r["version"]))
     return {
         "prequential": _load_prequential(),
         "runs": runs,
-        "promotions": _promotions(),
+        "promotions": promotions,
         "live": _current_live(),
         "kept_on_disk": len(disk),
     }

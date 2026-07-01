@@ -106,7 +106,8 @@ def _grow_hero_embed(sd: dict, model) -> int:
 
 def run_finetune(incumbent_dir: Path, out_ver: str, train_cutoff: str,
                  eval_dates: list[str], epochs: int, n_train_rows: int,
-                 lr: float = 2e-4, warmup_steps: int = 500, warm_start: bool = True) -> Path:
+                 lr: float = 2e-4, warmup_steps: int = 500, warm_start: bool = True,
+                 created: str = "") -> Path:
     """Run the full multi-task recipe on materialized rolling-store data and register
     the candidate version (model.pt + config + vocab + carried-forward artifacts +
     metrics.json). warm_start=True loads the incumbent weights (nightly fine-tune);
@@ -205,6 +206,22 @@ def run_finetune(incumbent_dir: Path, out_ver: str, train_cutoff: str,
             "val_auc_pure_pregame": tr.best_pure_pregame_auc,
             "final_probe_results": final_probes, "epochs": epochs,
             "train_cutoff": train_cutoff, "warm_started_from": incumbent_dir.name}, indent=2))
+        # Durable per-version record (promoted is flipped later by registry.set_live).
+        # An in-place refit (out_dir == incumbent_dir) extends a version rather than
+        # deriving a new one, so it has no parent and is noted as such.
+        in_place = out_dir.resolve() == incumbent_dir.resolve()
+        registry.write_manifest(out_ver, registry.Manifest(
+            version=out_ver,
+            parent=None if in_place else incumbent_dir.name,
+            created=created,
+            train_window={"train_cutoff": train_cutoff,
+                          "eval_start": min(eval_dates) if eval_dates else None,
+                          "eval_end": max(eval_dates) if eval_dates else None,
+                          "n_eval_days": len(eval_dates)},
+            metrics={"val_auc_pure_pregame": tr.best_pure_pregame_auc,
+                     "final_probe_results": final_probes},
+            notes=f"refit-for-serving through {train_cutoff}" if in_place
+                  else ("from-scratch" if not warm_start else "")))
         registry.register(out_ver)
         return out_dir
     finally:
