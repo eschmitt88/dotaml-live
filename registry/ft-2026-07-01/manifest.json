@@ -1,0 +1,27 @@
+{
+  "version": "ft-2026-07-01",
+  "parent": "ft-2026-06-29",
+  "created": "2026-07-01T04:02:32+00:00",
+  "train_window": {
+    "train_cutoff": "2026-06-24",
+    "eval_start": "2026-06-25",
+    "eval_end": "2026-07-01",
+    "n_eval_days": 7
+  },
+  "metrics": {
+    "val_auc_pure_pregame": 0.6547048281660757,
+    "final_probe_results": {
+      "pure_pregame": 0.6510450895411177,
+      "partial_draft": 0.0232,
+      "duration_cond": 0.6805559758975595,
+      "items_cond": 0.9906951455181541,
+      "outcome_cond": 0.3844968378543854,
+      "partial_items": 0.06496769245683769,
+      "kills_pair_probe": 0.5048143863677979,
+      "gpm_probe": 0.07264045625925064,
+      "hd_probe": 0.0469016507267952
+    }
+  },
+  "promoted": false,
+  "notes": ""
+}
